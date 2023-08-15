@@ -33,3 +33,14 @@
     </dependency>
 </dependencies>
 ````
+
+## Creando Proyecto REST
+
+Copiamos las clases, interfaces, propiedades, etc. del proyecto de
+[**spring-boot-webflux**](https://github.com/magadiflo/spring-boot-webflux.git) a fin de no empezar desde cero y
+**centrarnos en desarrollar la capa REST**, por lo tanto, dejaremos hasta este punto tal como se ve en la imagen:
+
+![archivos-iniciales.png](./assets/archivos-iniciales.png)
+
+Como se aprecia, tenemos todas las capas excepto la de **/resources o /controllers**, quien contendrá nuestras clases
+controladoras anotadas con @RestController.
