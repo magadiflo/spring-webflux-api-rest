@@ -203,3 +203,47 @@ Realizamos la petición con un **producto cuyo id no existe:**
 --- Respuesta
 < HTTP/1.1 404 Not Found
 ````
+
+## RestController - POST crear producto
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+    /* omitted code */
+    @PostMapping
+    public Mono<ResponseEntity<Product>> createProduct(@RequestBody Product product) {
+        if (product.getCreateAt() == null) {
+            product.setCreateAt(LocalDate.now());
+        }
+        return this.productService.saveProduct(product)
+                .map(productDB -> ResponseEntity
+                        .created(URI.create("/api/v1/products/" + productDB.getId()))
+                        .body(productDB));
+    }
+}
+````
+
+Realizamos la petición para crear un producto:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Vidrio templado\", \"price\": 890.50, \"category\": {\"id\": \"64dbf805a735203c6c342b1f\", \"name\": \"Decoración\"}}" http://localhost:8080/api/v1/products
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v1/products/64dbf930a735203c6c342b2e
+< Content-Type: application/json
+<
+{
+  "id":"64dbf930a735203c6c342b2e",
+  "name":"Vidrio templado",
+  "price":890.5,
+  "createAt":"2023-08-15",
+  "image":null,
+  "category":{
+    "id":"64dbf805a735203c6c342b1f",
+    "name":"Decoración"
+    }
+}
+````

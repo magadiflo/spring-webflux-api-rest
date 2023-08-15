@@ -3,12 +3,12 @@ package com.magadiflo.api.rest.app.controllers;
 import com.magadiflo.api.rest.app.models.documents.Product;
 import com.magadiflo.api.rest.app.models.services.IProductService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.net.URI;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping(path = "/api/v1/products")
@@ -29,5 +29,16 @@ public class ProductController {
         return this.productService.findById(id)
                 .map(ResponseEntity::ok)
                 .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping
+    public Mono<ResponseEntity<Product>> createProduct(@RequestBody Product product) {
+        if (product.getCreateAt() == null) {
+            product.setCreateAt(LocalDate.now());
+        }
+        return this.productService.saveProduct(product)
+                .map(productDB -> ResponseEntity
+                        .created(URI.create("/api/v1/products/" + productDB.getId()))
+                        .body(productDB));
     }
 }
