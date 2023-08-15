@@ -41,4 +41,17 @@ public class ProductController {
                         .created(URI.create("/api/v1/products/" + productDB.getId()))
                         .body(productDB));
     }
+
+    @PutMapping(path = "/{id}")
+    public Mono<ResponseEntity<Product>> updateProduct(@PathVariable String id, @RequestBody Product product) {
+        return this.productService.findById(id)
+                .flatMap(productDB -> {
+                    productDB.setName(product.getName());
+                    productDB.setPrice(product.getPrice());
+                    productDB.setCategory(product.getCategory());
+                    return this.productService.saveProduct(productDB);
+                })
+                .map(ResponseEntity::ok)
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
 }

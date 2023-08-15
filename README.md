@@ -247,3 +247,96 @@ curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Vidrio temp
     }
 }
 ````
+
+## RestController - PUT actualizar producto
+
+El código implementado para el endpoint de actualizar producto es el siguiente:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+    @PutMapping(path = "/{id}")
+    public Mono<ResponseEntity<Product>> updateProduct(@PathVariable String id, @RequestBody Product product) {
+        return this.productService.findById(id)             // Mono<Product>
+                .flatMap(productDB -> {                     // Mono<Product>
+                    productDB.setName(product.getName());
+                    productDB.setPrice(product.getPrice());
+                    productDB.setCategory(product.getCategory());
+                    return this.productService.saveProduct(productDB); // Mono<Product>
+                })
+                .map(ResponseEntity::ok)                    // Mono<ResponseEntity<Product>>
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+}
+````
+
+En este punto es necesario hacer una diferencia entre **flatMap()** y **map()**:
+
+1. ``map`` **en un Mono**, es un operador que se utiliza para **transformar el valor contenido en el Mono en otro
+   valor.** En otras palabras, toma el valor actual dentro del Mono y aplica una función a ese valor para producir un
+   nuevo valor. **El resultado es un nuevo Mono que contiene el valor transformado.**
+
+   Ahora, tomando como referencia el código anterior vemos que implementamos ``map(ResponseEntity::ok)``, la explicación
+   sería: Cuando el flujo llega a ese **map()** llega como un ``Mono<Product>``, luego el map lo que hace es coger el
+   valor interno de ese **Mono**, es decir coge el **Product** y lo transforma en su interior; en nuestro caso, lo que
+   hacemos con ese **Product** es convertirlo en un **ResponseEntity.ok(product)** o en su defecto la forma abreviada
+   sería **ResponseEntity::ok**, finalmente el **map()** retorna un **Mono** del valor transformado, es decir retorna un
+   ``Mono<ResponseEntity<Product>>``.
+
+
+2. ``flatMap`` **en un Mono**, es un operador que se utiliza para transformar el valor contenido en un Mono en otro
+   Mono (permitiendo operaciones reactivas anidadas). La diferencia clave entre map y flatMap es que flatMap permite
+   trabajar con valores que también son reactivos. **El flatMap se encarga de manejar la "desenvoltura" de los Monos
+   anidados. El resultado final es un Mono que contiene el valor transformado.**
+
+   Ahora, tomando como referencia el código anterior vemos que implementamos:
+   ````
+   .flatMap(productDB -> {                                 // Mono<Product>
+        productDB.setName(product.getName());
+        productDB.setPrice(product.getPrice());
+        productDB.setCategory(product.getCategory());
+        return this.productService.saveProduct(productDB); // Mono<Product>
+    })
+   ````
+
+   Cuando el flujo llega al **flatMap()** llega como un ``Mono<Product>``, lo que hace el **flatMap** es coger el valor
+   interno del Mono, o sea coge el **Product**, luego dentro del flatMap **se aplica alguna transformación
+   a ese Product** e incluso se utiliza el **productService** para guardar el producto modificado y retorna el valor
+   devuelto por el **saveProduct()** que es un ``Mono<Product>``, finalmente lo que hace el **flatMap()** es eliminar
+   las múltiples envolturas que puedan haber del Mono, es decir si en vez de flatMap, usáramos el **map()** lo que haría
+   ese map, luego de que el **saveProduct()** retorne un ``Mono<Product>`` sería retornar al flujo un
+   ``Mono<Mono<Product>>``, es decir lo que está haciendo es envolver la respuesta dada por el **saveProduct()** dentro
+   de un **Mono** y eso no queremos, por eso es que usamos el **flatMap()** ya que este se encarga de aplanar la
+   respuesta en un solo **Mono**.
+
+Listo, ahora sí actualizamos un producto existente:
+
+````bash
+curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Scooter\", \"price\": 5000.50, \"category\": {\"id\": \"64dbfdc182114c2f7ab5361b\", \"name\": \"Electrónico\"}}" http://localhost:8080/api/v1/products/64dbfdc282114c2f7ab53621 | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+{
+  "id": "64dbfdc282114c2f7ab53621",
+  "name": "Scooter",
+  "price": 5000.5,
+  "createAt": "2023-08-15",
+  "image": null,
+  "category": {
+    "id": "64dbfdc182114c2f7ab5361b",
+    "name": "Electrónico"
+  }
+}
+````
+
+Si tratamos de actualizar un producto que no existe:
+
+````bash
+curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Scooter\", \"price\": 5000.50, \"category\": {\"id\": \"64dbfdc182114c2f7ab5361b\", \"name\": \"Electrónico\"}}" http://localhost:8080/api/v1/products/64dbfdc282114c2f7ab5lkju | jq
+
+--- Respuesta
+< HTTP/1.1 404 Not Found
+````
