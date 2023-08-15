@@ -155,3 +155,51 @@ curl -v http://localhost:8080/api/v1/products | jq
   {...},
  ]
 ````
+
+## RestController - GET ver producto
+
+A continuación se muestra la implementación para ver un producto por su id:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+    /* omitted code */
+    @GetMapping(path = "/{id}")
+    public Mono<ResponseEntity<Product>> getProduct(@PathVariable String id) {
+        return this.productService.findById(id)
+                .map(ResponseEntity::ok)
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+}
+````
+
+Realizamos la petición con un **producto existente:**
+
+````bash
+curl -v http://localhost:8080/api/v1/products/64dbf481f239914cea4e43bc | jq
+
+-- Respuesta
+< HTTP/1.1 200 OK
+{
+  "id": "64dbf481f239914cea4e43bc",
+  "name": "Colchón Medallón 2 plazas",
+  "price": 710,
+  "createAt": "2023-08-15",
+  "image": null,
+  "category": {
+    "id": "64dbf481f239914cea4e43ae",
+    "name": "Muebles"
+  }
+}
+````
+
+Realizamos la petición con un **producto cuyo id no existe:**
+
+````bash
+ curl -v http://localhost:8080/api/v1/products/64dbf481f239914cea4e43bx | jq
+ 
+--- Respuesta
+< HTTP/1.1 404 Not Found
+````
