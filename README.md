@@ -1,4 +1,4 @@
-# Sección: API RESTFull usando RestController
+# Sección: API RESTFul usando RestController
 
 ---
 
@@ -711,3 +711,158 @@ curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \
 }
 ````
 
+---
+
+# Sección: API RESTFul usando Functional EndPoints
+
+---
+
+Otra forma de implementar API REST con WebFlux es utilizando **RouterFunction**, es una forma más liviana, con
+programación funcional al 100% y es más reactiva, para ello tenemos que hacer varias configuraciones, entre ellas,
+configurar un **RouterFunction** que contenga las rutas de los componentes handler, que se encargan de manejar las
+peticiones del API Rest.
+
+## Creando y configurando componentes Router Function y Handler
+
+Crearemos nuestra clase de configuración **RouterFunctionConfig** donde implementaremos el **RouterFunction** y
+definiremos la ruta para poder listar los productos:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    private final IProductService productService;
+
+    public RouterFunctionConfig(IProductService productService) {
+        this.productService = productService;
+    }
+
+    @Bean
+    public RouterFunction<ServerResponse> routes() {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), request -> {
+            Flux<Product> productFlux = this.productService.findAll();
+            return ServerResponse.ok().body(productFlux, Product.class);
+        });
+    }
+}
+````
+
+- **RouterFunction**, representa una función que enruta a una functión de controlador (handler).
+- El **ServerResponse** representa un tipo de respuesta HTTP de lado del servidor, tal como la devuelve una función de
+  handler o una función de filtro.
+- El método estático **route()** enruta la solicitud al **handlerFunction** (en nuestro caso el handlerFunction es la
+  función anónima o expresión lambda) si se aplica el predicado dado en de la solicitud.
+- Podemos definir tantos endpoints para **un mismo handlerFunction** utilizando el operador **or().**
+- El **handlerFunction** representa una función que maneja la solicitud, en nuestro caso utilizamos una functión anónima
+  o expresión como **handlerFunction**.
+
+Notar que por ahora estamos implementando como **handlerFunction** una función anónima o expresión lambda, pero **la
+idea es desacoplar este método handler de esta clase de configuración y llevarlo a una clase distinta**, un componente
+que le llamaremos ProductHandler. Pero por ahora veamos el funcionamiento:
+
+````bash
+curl -v http://localhost:8080/api/v3/products | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< transfer-encoding: chunked
+< Content-Type: application/json
+[
+  {
+    "id": "64dd42afae2ce5407a7abf01",
+    "name": "Sony Cámara HD",
+    "price": 680.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd42aeae2ce5407a7abefc",
+      "name": "Electrónico"
+    }
+  },
+  {
+    "id": "64dd42afae2ce5407a7abf02",
+    "name": "Bicicleta Monteñera",
+    "price": 1800.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd42afae2ce5407a7abefd",
+      "name": "Deporte"
+    }
+  },
+  {...}
+ ]
+````
+
+Ahora mejoremos la legibilidad de la implementación anterior separando los **métodos handler** en una clase de
+componente propio y que en nuestra clase de configuración serán usados como **handlerFunctions**.
+
+````java
+
+@Component
+public class ProductHandler {
+
+    private final IProductService productService;
+
+    public ProductHandler(IProductService productService) {
+        this.productService = productService;
+    }
+
+    public Mono<ServerResponse> listAllProducts(ServerRequest request) {
+        Flux<Product> productFlux = this.productService.findAll();
+        return ServerResponse.ok().body(productFlux, Product.class);
+    }
+}
+````
+
+En el código anterior definimos el método **listAllProducts()** que retorna un `Mono<ServerResponse>` y en el código
+siguiente lo utilizamos como un **handlerFunction**:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts);
+    }
+}
+````
+
+Si probamos el endpoint con esta nueva configuración, esta será la respuesta obtenida:
+
+````bash
+curl -v http://localhost:8080/api/v2/products | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< transfer-encoding: chunked
+< Content-Type: application/json
+[
+  {
+    "id": "64dd4e916e9aa45b38025117",
+    "name": "Sony Cámara HD",
+    "price": 680.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd4e906e9aa45b38025112",
+      "name": "Electrónico"
+    }
+  },
+  {
+    "id": "64dd4e916e9aa45b38025118",
+    "name": "Bicicleta Monteñera",
+    "price": 1800.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd4e906e9aa45b38025113",
+      "name": "Deporte"
+    }
+  },
+  {...}
+ ]
+````
