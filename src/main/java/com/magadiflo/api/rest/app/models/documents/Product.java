@@ -21,6 +21,7 @@ public class Product {
     private LocalDate createAt;
     private String image;
     @Valid //Le decimos que este objeto se tiene que validar
+    @NotNull
     private Category category;
 
     public Product() {

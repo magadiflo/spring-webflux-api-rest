@@ -553,3 +553,161 @@ formato multipart/form-data, que es comúnmente utilizado para enviar archivos y
 solicitudes HTTP POST. En el caso del campo **imageFile** estamos usando el símbolo **@** que indica que el valor
 siguiente debe ser interpretado como un archivo.
 
+## Creando método handler con validación
+
+Crearemos un nuevo método para guardar un producto, pero esta vez contendrá validaciones:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+    /* omitted code */
+    @PostMapping(path = "/create-product-with-validation")
+    public Mono<ResponseEntity<Map<String, Object>>> createProductWithValidation(@Valid @RequestBody Mono<Product> productMono) {
+        Map<String, Object> response = new HashMap<>();
+
+        return productMono.flatMap(product -> { // (1)
+            if (product.getCreateAt() == null) {
+                product.setCreateAt(LocalDate.now());
+            }
+            return this.productService.saveProduct(product)
+                    .map(productDB -> {
+                        response.put("product", productDB);
+                        return ResponseEntity
+                                .created(URI.create("/api/v1/products/" + productDB.getId()))
+                                .body(response);
+                    });
+        }).onErrorResume(throwable -> {                                         // (2)
+            return Mono.just(throwable)
+                    .cast(WebExchangeBindException.class)                       // (3)
+                    .flatMap(e -> Mono.just(e.getFieldErrors()))                // (4)
+                    .flatMapMany(fieldErrors -> Flux.fromIterable(fieldErrors)) // (5)
+                    .map(fieldError -> "El campo " + fieldError.getField() + " " + fieldError.getDefaultMessage()) //(6)
+                    .collectList()      // (7)
+                    .flatMap(list -> {  // (8)
+                        response.put("errors", list);
+                        return Mono.just(ResponseEntity.badRequest().body(response));
+                    });
+        });
+    }
+}
+````
+
+Lo primero que explicaré será esta línea de código:
+
+````
+@PostMapping(path = "/create-product-with-validation")
+public Mono<ResponseEntity<Map<String, Object>>> createProductWithValidation(@Valid @RequestBody Mono<Product> productMono) {...}
+````
+
+- En el código anterior vemos que el tipo de retorno es un `Mono<ResponseEntity<Map<String, Object>>>`, pero fijémonos
+  en el `Map<String, Object>`, estamos retornando ese tipo de dato porque dentro de la implementación existen dos
+  posibilidades de datos a retornar: **un objeto producto o un objeto lista de strings (cuando ocurra un error de
+  validación)**, entonces para unificar la respuesta, creamos el tipo **Map** con el que incluso podríamos agregar las
+  respuestas que quisiéramos.
+
+
+- Usamos la anotación **@Valid** para habilitar la validación del producto.
+
+
+- Si recordamos el método `createProduct(@RequestBody Product product){...}` veremos que el argumento **product**, es un
+  objeto común y corriente al que se le mapeará el objeto json que venga en la petición. Ahora, en nuestro método
+  `createProductWithValidation(@Valid @RequestBody Mono<Product> productMono){...}` vemos que el argumento ya no es un
+  objeto común y corriente sino más bien un objeto del tipo Reactivo `Mono<Product>`. Es importante definirlo de esa
+  forma porque cuando falle la validación del producto, y al ser del tipo reactivo, podemos capturar la excepción y
+  manejar el error en el operador `onErrorResume()`.
+
+Ahora, mirando el código interno de nuestro nuevo método podremos ver que el flujo está en dos etapas: (1) cuando todo
+es correcto y la (2) cuando ocurre un error:
+
+- **(1)**, utilizando el **productMono** del parámetro realizamos el flujo exitoso para guardar el producto en la BD.
+- **(2)**, en caso de que el **productMono** tenga errores utilizamos el método **onErrorResume()** para manejar el
+  error.
+- **(3)**, el **throwable** como es una excepción muy genérica utilizamos el operador `cast()` para convertirlo en una
+  excepción más específica. El tipo de excepción más específica sería `WebExchangeBindException`
+- **(4)**, como la excepción nos devuelve un **List de FieldError** utilizamos un **flatMap** para retornar un:
+  `Mono<List<FieldError>>`.
+- **(5)**, el `List<FieldError>` lo convertiremos a un `Flux<FieldError>` para poder trabajar con cada campo, es por esa
+  razón que también usamos el operador **flatMapMany** porque ahora ya no devolverá un **Mono** sino un **Flux**.
+- **(6)**, cada campo **FieldError** lo transformamos en un string. El **map()** devolverá un `Flux<String>`.
+- **(7)**, convertimos el `Flux<String>` a un `Mono<List<String>>`.
+- **(8)**, en el **flatMap()** asignamos la lista de errores al **response** y retornamos un **Mono** del response
+  entity.
+
+**IMPORTANTE**
+
+> Como estamos implementando un API REST, y nuestro documento Product tiene un atributo Category y esta Category
+> internamente tiene la anotación de validación @NotBlank en su id, entonces **para que ese id de category también se
+> valide junto con los otros atributos de producto**, es necesario además de anotar el atributo `category` con `@Valid`
+> anotarlo con `@NotNull`, de esa manera, cuando creemos el producto no solo se validarán los atributos de producto,
+> sino también los atributos de categoría.
+
+````java
+
+@Document(collection = "products")
+public class Product {
+    /* omitted code */
+    @Valid
+    @NotNull
+    private Category category;
+    /* omitted code*/
+}
+````
+
+Creando un producto sin enviarle el precio ni la categoría:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Vidrio templado\"}" http://localhost:8080/api/v1/products/create-product-with-validation | jq
+
+--- Respuesta
+< HTTP/1.1 400 Bad Request
+< Content-Type: application/json
+{
+  "errors": [
+    "El campo category must not be null",
+    "El campo price must not be null"
+  ]
+}
+````
+
+Creando un producto sin enviarle el nombre ni la categoría:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"price\": 890.50, \"category\": {}}" http://localhost:8080/api/v1/products/create-product-with-validation | jq
+
+--- Respuesta
+< HTTP/1.1 400 Bad Request
+< Content-Type: application/json
+{
+  "errors": [
+    "El campo name must not be blank",
+    "El campo category.id must not be blank"
+  ]
+}
+````
+
+Creando producto enviándole todos los campos correctos:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \"price\": 890.50, \"category\": {\"id\": \"64dbf805a735203c6c342b1f\", \"name\": \"Decoración\"}}" http://localhost:8080/api/v1/products/create-product-with-validation | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v1/products/64dd113194ddbb28b5f2e69a
+< Content-Type: application/json
+{
+  "product": {
+    "id": "64dd113194ddbb28b5f2e69a",
+    "name": "Cocina",
+    "price": 890.5,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dbf805a735203c6c342b1f",
+      "name": "Decoración"
+    }
+  }
+}
+````
+
