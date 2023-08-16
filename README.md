@@ -394,3 +394,91 @@ curl -v -X DELETE http://localhost:8080/api/v1/products/64dc26198f7b916486d2fc2f
 >
 < HTTP/1.1 404 Not Found
 ````
+
+## Subiendo solo imagen
+
+Implementaremos un endpoint que nos permitirá **subir una imagen en función del id del producto** que pasemos como un
+path variable:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+
+    /* omitted code */
+
+    @Value("${config.uploads.path}")
+    private String uploadsPath;
+
+    /* omitted code */
+    @PostMapping(path = "/upload/{id}")
+    public Mono<ResponseEntity<Product>> uploadImage(@PathVariable String id, @RequestPart FilePart imageFile) { // (1)
+        return this.productService.findById(id)
+                .flatMap(productDB -> {
+                    String imageName = UUID.randomUUID().toString() + "-" + imageFile.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    productDB.setImage(imageName);
+
+                    return imageFile.transferTo(new File(this.uploadsPath + productDB.getImage())) // (2)
+                            .then(this.productService.saveProduct(productDB));
+                })
+                .map(ResponseEntity::ok)
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+}
+````
+
+**(1)** del código anterior, vemos que como segundo parámetro usamos ``@RequestPart FilePart imageFile``, donde:
+
+- **FilePart**, es una especialización de ``Part`` que representa un archivo cargado recibido en un request de
+  **multipart**. Un ``Part`` es una representación de una parte en un request ``multipart/form-data``. El origen de una
+  solicitud **multipart** puede ser un formulario de navegador, en cuyo caso cada parte es un
+  **FormFieldPart o FilePart**. Los request multipart también se pueden usar fuera de un navegador para datos de
+  cualquier tipo de contenido (por ejemplo, JSON, PDF, etc.).
+- **@RequestPart**, anotación que se puede usar para asociar la parte de una solicitud **"multipart/form-data"** con un
+  argumento de método.
+- **imageFile**, aparte de ser la variable asociada al FilePart, también es el nombre del campo con el que se debe
+  enviar la imagen en la solicitud.
+
+**(2)** en el return vemos dos partes, la primera es la ejecución del ``imageFile.transferTo(new File(ruta-e-imagen))``
+quien retorna un ``Mono<Void>``, es decir, en esta primera parte nos encargamos de subir la imagen al servidor donde
+estará almacenado y una vez finalizado ese proceso el método **transferTo()** retorna un ``Mono<Void>``, por
+consiguiente, hasta ese punto finalizó el proceso de subida de imagen, entonces **para continuar con un nuevo flujo**,
+en esta segunda parte usamos el ``.then(this.productService.saveProduct(productDB));`` e internamente usamos el servicio
+para guarda o actualizar el producto en la base de datos. Como respuesta, el método ``saveProduct(productDB)`` nos
+retorna un ``Mono<Product>`` que es lo que finalmente retorna el **flatMap()**.
+
+Podemos utilizar **Postman** para subir la imagen, en el apartado de **Body** seleccionar **form-data**, ingresar el
+nombre del campo que almacenará la imagen, en este caso sería **imageFile**, adjuntar la imagen y enviar la solicitud.
+En mi caso seguiré usando **curl**, ya que es más fácil tener los comandos que se ejecutan para colocarlos en este
+informe:
+
+````bash
+curl -v -X POST -H "Content-Type: multipart/form-data" -F "imageFile=@C:\Users\USUARIO\Downloads\bicicleta.png" http://localhost:8080/api/v1/products/upload/64dce9cc4db0da636eb5928d | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+<
+{
+  "id": "64dce9cc4db0da636eb5928d",
+  "name": "Bicicleta Monteñera",
+  "price": 1800.6,
+  "createAt": "2023-08-16",
+  "image": "04e7567d-39d7-4f3c-bf12-7010f4961681-bicicleta.png",
+  "category": {
+    "id": "64dce9cc4db0da636eb59288",
+    "name": "Deporte"
+  }
+}
+````
+
+**DONDE**
+
+- **"Content-Type: multipart/form-data"** indica que estás enviando datos de formulario multipartes
+- **-F**, especifica el campo **imageFile** que contiene la imagen que deseas cargar.
+- El símbolo **@** indica que el valor siguiente debe ser interpretado como un archivo.
+

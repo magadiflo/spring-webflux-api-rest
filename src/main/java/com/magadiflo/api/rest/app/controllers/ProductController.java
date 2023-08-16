@@ -2,19 +2,26 @@ package com.magadiflo.api.rest.app.controllers;
 
 import com.magadiflo.api.rest.app.models.documents.Product;
 import com.magadiflo.api.rest.app.models.services.IProductService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.File;
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.UUID;
 
 @RestController
 @RequestMapping(path = "/api/v1/products")
 public class ProductController {
     private final IProductService productService;
+
+    @Value("${config.uploads.path}")
+    private String uploadsPath;
 
     public ProductController(IProductService productService) {
         this.productService = productService;
@@ -61,6 +68,23 @@ public class ProductController {
         return this.productService.findById(id)
                 .flatMap(productDB -> this.productService.delete(productDB).then(Mono.just(true)))
                 .map(isDeleted -> new ResponseEntity<Void>(HttpStatus.NO_CONTENT))
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping(path = "/upload/{id}")
+    public Mono<ResponseEntity<Product>> uploadImage(@PathVariable String id, @RequestPart FilePart imageFile) {
+        return this.productService.findById(id)
+                .flatMap(productDB -> {
+                    String imageName = UUID.randomUUID().toString() + "-" + imageFile.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    productDB.setImage(imageName);
+
+                    return imageFile.transferTo(new File(this.uploadsPath + productDB.getImage()))
+                            .then(this.productService.saveProduct(productDB));
+                })
+                .map(ResponseEntity::ok)
                 .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
