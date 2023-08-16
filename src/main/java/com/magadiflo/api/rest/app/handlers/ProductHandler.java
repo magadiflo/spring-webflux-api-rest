@@ -22,4 +22,10 @@ public class ProductHandler {
         return ServerResponse.ok().body(productFlux, Product.class);
     }
 
+    public Mono<ServerResponse> showDetails(ServerRequest request) {
+        String id = request.pathVariable("id");
+        return this.productService.findById(id)
+                .flatMap(productDB -> ServerResponse.ok().bodyValue(productDB))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
 }

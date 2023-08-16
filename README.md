@@ -866,3 +866,88 @@ curl -v http://localhost:8080/api/v2/products | jq
   {...}
  ]
 ````
+
+## RouterFunction - GET ver detalle del producto
+
+La implementación de nuestra función para mostrar el detalle de un producto es el siguiente:
+
+````java
+
+@Component
+public class ProductHandler {
+    public Mono<ServerResponse> showDetails(ServerRequest request) {
+        String id = request.pathVariable("id");
+        return this.productService.findById(id)
+                .flatMap(productDB -> ServerResponse.ok().bodyValue(productDB))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Cuando usamos el RestController para solicitar los datos de un producto, lo que nos retorna el método correspondiente a
+ese endpoint es un `Mono<ResponseEntity<Product>>`, en su flujo interno busca el producto utilizando el service
+y luego usa el operador **map()** para convertir el producto obtenido en un `Mono<ResponseEntity<Product>>`. En ese caso
+usamos el operador **map()** porque el **ResponseEntity no es reactivo**, mientras que en nuestro caso actual
+**el ServerResponse sí es reactivo**, por lo tanto, cuando llamamos por ejemplo al
+`ServerResponse.ok().body(productFlux,...)` automáticamente el **body()** lo convierte en un `Mono<ServerResponse>`,
+por eso debemos usar un **flatMap**, ya que es un tipo reactivo.
+
+**IMPORTANTE**
+
+> Observemos que en el método **listAllProducts()** en el retorno del **body(productFlux)** usamos directamente el Flux
+> de producto. Ahora, en el método **showDetails()** en retorno del **bodyValue(productDB)** usamos directamente el
+> objeto común de producto, y esto es, porque en este segundo método el objeto **productDB** es un objeto normal, es
+> decir, no es ni un Flux ni un Mono, mientras que en el **listAllProducts()** lo que se pasa sí es un objeto reactivo,
+> porque es un Flux.
+>
+> **CONCLUSIÓN:**<br>
+> Usar **bodyValue()** para anexar **objetos comunes que no sean ni Flux ni Mono**, y usar **body()** para **objetos
+> reactivos como Flux y Mono**, BodyInserters.fromPublisher también sirve, BodyInserters es una alternativa a lo mismo,
+> usando una clase y métodos estáticos.
+
+Finalmente implementamos la ruta que apuntará a esta nueva función:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Realizamos la solicitud y vemos el resultado cuando el producto existe:
+
+````bash
+curl -v http://localhost:8080/api/v2/products/64dd57be7006723fb52178d4 | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+{
+  "id": "64dd57be7006723fb52178d4",
+  "name": "Sony Cámara HD",
+  "price": 680.6,
+  "createAt": "2023-08-16",
+  "image": null,
+  "category": {
+    "id": "64dd57be7006723fb52178cf",
+    "name": "Electrónico"
+  }
+}
+````
+
+Realizamos la solicitud para ver un producto que no existe:
+
+````bash
+curl -v http://localhost:8080/api/v2/products/64dd57be7006723fb5ddddd | jq
+
+--- Respuesta
+>
+< HTTP/1.1 404 Not Found
+< content-length: 0
+````
