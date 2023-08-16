@@ -340,3 +340,57 @@ curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Scooter\", \
 --- Respuesta
 < HTTP/1.1 404 Not Found
 ````
+
+## RestController - DELETE eliminar producto
+
+Implementamos el endpoint para eliminar el producto:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+    /* omitted code */
+    @DeleteMapping(path = "/{id}")
+    public Mono<ResponseEntity<Void>> deleteProduct(@PathVariable String id) {
+        return this.productService.findById(id)
+                .flatMap(productDB -> this.productService.delete(productDB).then(Mono.just(true)))  // (1)
+                .map(isDeleted -> new ResponseEntity<Void>(HttpStatus.NO_CONTENT))                  // (2)
+                .defaultIfEmpty(ResponseEntity.notFound().build());                                 // (3)
+    }
+}
+````
+
+**(1)** en esa parte del código estamos llamando al  ``this.productService.delete(productDB)`` quien nos retorna un
+``Mono<Void>``, precisamente porque nos retorna un ``Mono<Void>`` es que usamos el método **then()** para crear otro
+**Mono** que tenga un tipo que no sea **Void**, en mi caso, creé un ``Mono<Boolean>`` para que el flujo continúe en el
+siguiente operador **map()**. **¿Qué pasa si no hubiera usado el then(), es decir si solo hubiera retornado el
+this.productService.delete(productDB)?**, pues como el método **delete()** retorna un ``Mono<Void>``, le estaríamos
+diciendo al flujo que lo que sigue es vacío, por lo tanto, ya no entraría en el operador **map()** sino se pasaría al
+operador **defaultIfEmpty()**.
+
+**(2)** usamos el **new** para crear el objeto ResponseEntity indicándole que es **Void**. En este caso no usamos el
+método estático como en el **(3)** porque si lo hacemos nos muestra el error diciendo que lo que se está retornando es
+un Object: ``Mono<ResponseEntity<Object>>`` y lo que nosotros tenemos que retornar es un ``Mono<ResponseEntity<Void>>``,
+eso lo conseguimos con el **new ResponseEntity<Void>()**. Ahora, en el **(3)**, que corresponde al método  
+**defaultIfEmpty()** sí acepta la creación del ResponseEntity con el método estático.
+
+Eliminando un producto:
+
+````bash
+curl -v -X DELETE http://localhost:8080/api/v1/products/64dc26198f7b916486d2fc2f
+
+--- Respuesta
+>
+< HTTP/1.1 204 No Content
+````
+
+Eliminando nuevamente el mismo producto:
+
+````bash
+curl -v -X DELETE http://localhost:8080/api/v1/products/64dc26198f7b916486d2fc2f
+
+--- Respuesta
+>
+< HTTP/1.1 404 Not Found
+````

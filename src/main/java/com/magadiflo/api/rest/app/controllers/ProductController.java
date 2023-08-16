@@ -2,6 +2,7 @@ package com.magadiflo.api.rest.app.controllers;
 
 import com.magadiflo.api.rest.app.models.documents.Product;
 import com.magadiflo.api.rest.app.models.services.IProductService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
@@ -54,4 +55,13 @@ public class ProductController {
                 .map(ResponseEntity::ok)
                 .defaultIfEmpty(ResponseEntity.notFound().build());
     }
+
+    @DeleteMapping(path = "/{id}")
+    public Mono<ResponseEntity<Void>> deleteProduct(@PathVariable String id) {
+        return this.productService.findById(id)
+                .flatMap(productDB -> this.productService.delete(productDB).then(Mono.just(true)))
+                .map(isDeleted -> new ResponseEntity<Void>(HttpStatus.NO_CONTENT))
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+
 }
