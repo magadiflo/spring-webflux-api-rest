@@ -88,4 +88,24 @@ public class ProductController {
                 .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
+    @PostMapping(path = "/product-with-image")
+    public Mono<ResponseEntity<Product>> createProductWithImage(Product product, @RequestPart FilePart imageFile) {
+        if (product.getCreateAt() == null) {
+            product.setCreateAt(LocalDate.now());
+        }
+
+        String imageName = UUID.randomUUID().toString() + "-" + imageFile.filename()
+                .replace(" ", "")
+                .replace(":", "")
+                .replace("\\", "");
+        product.setImage(imageName);
+
+        return imageFile.transferTo(new File(this.uploadsPath + product.getImage()))
+                .then(this.productService.saveProduct(product)
+                        .map(productDB -> ResponseEntity
+                                .created(URI.create("/api/v1/products/" + productDB.getId()))
+                                .body(productDB))
+                );
+    }
+
 }

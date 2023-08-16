@@ -479,6 +479,77 @@ curl -v -X POST -H "Content-Type: multipart/form-data" -F "imageFile=@C:\Users\U
 **DONDE**
 
 - **"Content-Type: multipart/form-data"** indica que estás enviando datos de formulario multipartes
-- **-F**, especifica el campo **imageFile** que contiene la imagen que deseas cargar.
+- **-F**, especifica el campo **imageFile** que contiene la imagen que deseas cargar. La **-F** significa **"form field"
+  o "campo de formulario"**. Específicamente, se utiliza para adjuntar datos en formato multipart/form-data, que es
+  comúnmente utilizado para **enviar archivos y campos de formulario** a través de solicitudes HTTP POST.
 - El símbolo **@** indica que el valor siguiente debe ser interpretado como un archivo.
+
+## Subiendo imagen junto a su producto
+
+Creamos el método que permitirá subir un producto junto a su imagen al mismo tiempo:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+    /* omitted code */
+    @PostMapping(path = "/product-with-image")
+    public Mono<ResponseEntity<Product>> createProductWithImage(Product product, @RequestPart FilePart imageFile) {
+        if (product.getCreateAt() == null) {
+            product.setCreateAt(LocalDate.now());
+        }
+
+        String imageName = UUID.randomUUID().toString() + "-" + imageFile.filename()
+                .replace(" ", "")
+                .replace(":", "")
+                .replace("\\", "");
+        product.setImage(imageName);
+
+        return imageFile.transferTo(new File(this.uploadsPath + product.getImage()))
+                .then(this.productService.saveProduct(product)
+                        .map(productDB -> ResponseEntity
+                                .created(URI.create("/api/v1/products/" + productDB.getId()))
+                                .body(productDB))
+                );
+    }
+}
+````
+
+No podemos subir los datos del producto como un json, tiene que ser el **Content-Type del request como un form-data**
+por eso es que **al primer argumento Product product le quitamos el @RequestBody**.
+
+Cuando mandemos la petición **escribiremos campo por campo todos los pertenecientes a Product y en automático se
+mapearán al argumento product**.
+
+La implementación del método **createProductWithImage()** es una fusión de los métodos implementados en
+**createProduct() y uploadImage()**.
+
+Ahora, haremos una petición a nuestro endpoint usando curl:
+
+````bash
+curl -v -X POST -H "Content-Type: multipart/form-data" -F "name=casa de perrito" -F "price=8900.50" -F "category.id=64dd00a45600b9132d8a4652" -F "category.name=Muebles" -F "imageFile=@C:\Users\USUARIO\Downloads\casa.png" http://localhost:8080/api/v1/products/product-with-image | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v1/products/64dd01fd5600b9132d8a4664
+< Content-Type: application/json
+< Content-Length: 215
+{
+  "id": "64dd01fd5600b9132d8a4664",
+  "name": "casa de perrito",
+  "price": 8900.5,
+  "createAt": "2023-08-16",
+  "image": "b1de00c2-d642-4747-a38c-7ab19e1abf80-casa.png",
+  "category": {
+    "id": "64dd00a45600b9132d8a4652",
+    "name": "Muebles"
+  }
+````
+
+El parámetro **-F** se utiliza para indicar que **estás adjuntando un campo de formulario en la solicitud POST**. La
+abreviación **-F significa "form field" o "campo de formulario"**. Específicamente, se utiliza para adjuntar datos en
+formato multipart/form-data, que es comúnmente utilizado para enviar archivos y campos de formulario a través de
+solicitudes HTTP POST. En el caso del campo **imageFile** estamos usando el símbolo **@** que indica que el valor
+siguiente debe ser interpretado como un archivo.
 
