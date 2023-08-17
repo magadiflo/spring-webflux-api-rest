@@ -1380,3 +1380,147 @@ curl -v -X POST -H "Content-Type: multipart/form-data" -F "name=casa de Ingenier
   }
 }
 ````
+
+## RouterFunction - Creando un handlerFunction con validación
+
+Cuando trabajamos con `@RestController` la validación es más automático, simplemente usamos la anotación `@Valid`
+mientras que **aquí, en un handlerFunction, es mucho más manual no tenemos anotaciones**, pero podemos inyectar el
+componente de Spring `Validator` y validar de forma manual.
+
+Empezamos creando un nuevo método handlerFunction para crear un producto, pero esta vez agregándole validaciones:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted property */
+    private final Validator validator;
+
+    /* omitted property */
+
+    public ProductHandler(IProductService productService, Validator validator) {
+        this.productService = productService;
+        this.validator = validator;
+    }
+
+    /* omitted code */
+    public Mono<ServerResponse> createProductWithValidation(ServerRequest request) {
+        RequestPath requestPath = request.requestPath();
+        Mono<Product> productMono = request.bodyToMono(Product.class);
+        return productMono
+                .flatMap(product -> {
+
+                    Errors errors = new BeanPropertyBindingResult(product, Product.class.getName());
+                    this.validator.validate(product, errors);
+
+                    if (errors.hasErrors()) {
+                        return Flux.fromIterable(errors.getFieldErrors())
+                                .map(fieldError -> String.format("[Validación 2] El campo %s %s", fieldError.getField(), fieldError.getDefaultMessage()))
+                                .collectList()
+                                .flatMap(listStings -> ServerResponse.badRequest().bodyValue(listStings));
+                    }
+
+                    if (product.getCreateAt() == null) {
+                        product.setCreateAt(LocalDate.now());
+                    }
+                    return this.productService.saveProduct(product)
+                            .flatMap(productDB -> ServerResponse
+                                    .created(URI.create(requestPath.value() + "/" + productDB.getId()))
+                                    .bodyValue(productDB));
+                });
+    }
+    /* omitted code */
+}
+````
+
+En el código anterior inyectamos la interface **Validator**, el que precisamente usamos dentro del **flatMap()** para
+hacer las validaciones.
+
+Este código es similar al que usamos en el método **createProduct()** que no realiza validación, pero con una pequeña
+modificación, mientras que en este nuevo método con validación agregamos este fragmento que lo diferencia:
+
+````
+Errors errors = new BeanPropertyBindingResult(product, Product.class.getName());
+this.validator.validate(product, errors);
+
+if (errors.hasErrors()) {
+    return Flux.fromIterable(errors.getFieldErrors())
+            .map(fieldError -> String.format("[Validación 2] El campo %s %s", fieldError.getField(), fieldError.getDefaultMessage()))
+            .collectList()
+            .flatMap(listStings -> ServerResponse.badRequest().bodyValue(listStings));
+}
+````
+
+Observamos que luego que se verifica que hay errores, simplemente retornamos un **ServerResponse** con la lista de los
+mensajes de errores.
+
+Agregamos la nueva ruta para este handlerFunction:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/create-product-with-validation"), productHandler::createProductWithValidation) //<-- Ruta implementada en este apartado
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct)
+                .andRoute(RequestPredicates.DELETE("/api/v2/products/{id}"), productHandler::deleteProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/upload/{id}"), productHandler::uploadImageFile)
+                .andRoute(RequestPredicates.POST("/api/v2/products/product-with-image"), productHandler::createProductWithImage);
+    }
+}
+````
+
+Registramos un producto sin el precio ni la categoría:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\"}" http://localhost:8080/api/v2/products/create-product-with-validation | jq
+
+--- Respuesta
+< HTTP/1.1 400 Bad Request
+< Content-Type: application/json
+[
+  "[Validación 2] El campo price must not be null",
+  "[Validación 2] El campo category must not be null"
+]
+````
+
+Registramos un producto sin el nombre ni datos de la categoría:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"price\": 890.50, \"category\": {}}" http://localhost:8080/api/v2/products/create-product-with-validation | jq
+
+--- Response
+< HTTP/1.1 400 Bad Request
+< Content-Type: application/json
+[
+  "[Validación 2] El campo name must not be blank",
+  "[Validación 2] El campo category.id must not be blank"
+]
+````
+
+Registramos exitosamente un producto:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \"price\": 890.50, \"category\": {\"id\": \"64de9a2e10d334754fdc6869\", \"name\": \"Decoración\"}}" http://localhost:8080/api/v2/products/create-product-with-validation | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v2/products/create-product-with-validation/64de9a7d10d334754fdc6878
+< Content-Type: application/json
+{
+  "id": "64de9a7d10d334754fdc6878",
+  "name": "Cocina",
+  "price": 890.5,
+  "createAt": "2023-08-17",
+  "image": null,
+  "category": {
+    "id": "64de9a2e10d334754fdc6869",
+    "name": "Decoración"
+  }
+}
+````
