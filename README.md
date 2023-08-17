@@ -1,4 +1,4 @@
-# Sección: API RESTFull usando RestController
+# Sección: API RESTFul usando RestController
 
 ---
 
@@ -711,3 +711,816 @@ curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \
 }
 ````
 
+---
+
+# Sección: API RESTFul usando Functional EndPoints
+
+---
+
+Otra forma de implementar API REST con WebFlux es utilizando **RouterFunction**, es una forma más liviana, con
+programación funcional al 100% y es más reactiva, para ello tenemos que hacer varias configuraciones, entre ellas,
+configurar un **RouterFunction** que contenga las rutas de los componentes handler, que se encargan de manejar las
+peticiones del API Rest.
+
+## Creando y configurando componentes Router Function y Handler
+
+Crearemos nuestra clase de configuración **RouterFunctionConfig** donde implementaremos el **RouterFunction** y
+definiremos la ruta para poder listar los productos:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    private final IProductService productService;
+
+    public RouterFunctionConfig(IProductService productService) {
+        this.productService = productService;
+    }
+
+    @Bean
+    public RouterFunction<ServerResponse> routes() {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), request -> {
+            Flux<Product> productFlux = this.productService.findAll();
+            return ServerResponse.ok().body(productFlux, Product.class);
+        });
+    }
+}
+````
+
+- **RouterFunction**, representa una función que enruta a una functión de controlador (handler).
+- El **ServerResponse** representa un tipo de respuesta HTTP de lado del servidor, tal como la devuelve una función de
+  handler o una función de filtro.
+- El método estático **route()** enruta la solicitud al **handlerFunction** (en nuestro caso el handlerFunction es la
+  función anónima o expresión lambda) si se aplica el predicado dado en de la solicitud.
+- Podemos definir tantos endpoints para **un mismo handlerFunction** utilizando el operador **or().**
+- El **handlerFunction** representa una función que maneja la solicitud, en nuestro caso utilizamos una functión anónima
+  o expresión como **handlerFunction**.
+
+Notar que por ahora estamos implementando como **handlerFunction** una función anónima o expresión lambda, pero **la
+idea es desacoplar este método handler de esta clase de configuración y llevarlo a una clase distinta**, un componente
+que le llamaremos ProductHandler. Pero por ahora veamos el funcionamiento:
+
+````bash
+curl -v http://localhost:8080/api/v3/products | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< transfer-encoding: chunked
+< Content-Type: application/json
+[
+  {
+    "id": "64dd42afae2ce5407a7abf01",
+    "name": "Sony Cámara HD",
+    "price": 680.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd42aeae2ce5407a7abefc",
+      "name": "Electrónico"
+    }
+  },
+  {
+    "id": "64dd42afae2ce5407a7abf02",
+    "name": "Bicicleta Monteñera",
+    "price": 1800.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd42afae2ce5407a7abefd",
+      "name": "Deporte"
+    }
+  },
+  {...}
+ ]
+````
+
+Ahora mejoremos la legibilidad de la implementación anterior separando los **métodos handler** en una clase de
+componente propio y que en nuestra clase de configuración serán usados como **handlerFunctions**.
+
+````java
+
+@Component
+public class ProductHandler {
+
+    private final IProductService productService;
+
+    public ProductHandler(IProductService productService) {
+        this.productService = productService;
+    }
+
+    public Mono<ServerResponse> listAllProducts(ServerRequest request) {
+        Flux<Product> productFlux = this.productService.findAll();
+        return ServerResponse.ok().body(productFlux, Product.class);
+    }
+}
+````
+
+En el código anterior definimos el método **listAllProducts()** que retorna un `Mono<ServerResponse>` y en el código
+siguiente lo utilizamos como un **handlerFunction**:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts);
+    }
+}
+````
+
+Si probamos el endpoint con esta nueva configuración, esta será la respuesta obtenida:
+
+````bash
+curl -v http://localhost:8080/api/v2/products | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< transfer-encoding: chunked
+< Content-Type: application/json
+[
+  {
+    "id": "64dd4e916e9aa45b38025117",
+    "name": "Sony Cámara HD",
+    "price": 680.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd4e906e9aa45b38025112",
+      "name": "Electrónico"
+    }
+  },
+  {
+    "id": "64dd4e916e9aa45b38025118",
+    "name": "Bicicleta Monteñera",
+    "price": 1800.6,
+    "createAt": "2023-08-16",
+    "image": null,
+    "category": {
+      "id": "64dd4e906e9aa45b38025113",
+      "name": "Deporte"
+    }
+  },
+  {...}
+ ]
+````
+
+## RouterFunction - GET ver detalle del producto
+
+La implementación de nuestra función para mostrar el detalle de un producto es el siguiente:
+
+````java
+
+@Component
+public class ProductHandler {
+    public Mono<ServerResponse> showDetails(ServerRequest request) {
+        String id = request.pathVariable("id");
+        return this.productService.findById(id)
+                .flatMap(productDB -> ServerResponse.ok().bodyValue(productDB))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Cuando usamos el RestController para solicitar los datos de un producto, lo que nos retorna el método correspondiente a
+ese endpoint es un `Mono<ResponseEntity<Product>>`, en su flujo interno busca el producto utilizando el service
+y luego usa el operador **map()** para convertir el producto obtenido en un `Mono<ResponseEntity<Product>>`. En ese caso
+usamos el operador **map()** porque el **ResponseEntity no es reactivo**, mientras que en nuestro caso actual
+**el ServerResponse sí es reactivo**, por lo tanto, cuando llamamos por ejemplo al
+`ServerResponse.ok().body(productFlux,...)` automáticamente el **body()** lo convierte en un `Mono<ServerResponse>`,
+por eso debemos usar un **flatMap**, ya que es un tipo reactivo.
+
+**IMPORTANTE**
+
+> Observemos que en el método **listAllProducts()** en el retorno del **body(productFlux)** usamos directamente el Flux
+> de producto. Ahora, en el método **showDetails()** en retorno del **bodyValue(productDB)** usamos directamente el
+> objeto común de producto, y esto es, porque en este segundo método el objeto **productDB** es un objeto normal, es
+> decir, no es ni un Flux ni un Mono, mientras que en el **listAllProducts()** lo que se pasa sí es un objeto reactivo,
+> porque es un Flux.
+>
+> **CONCLUSIÓN:**<br>
+> Usar **bodyValue()** para anexar **objetos comunes que no sean ni Flux ni Mono**, y usar **body()** para **objetos
+> reactivos como Flux y Mono**, BodyInserters.fromPublisher también sirve, BodyInserters es una alternativa a lo mismo,
+> usando una clase y métodos estáticos.
+
+Finalmente implementamos la ruta que apuntará a esta nueva función:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Realizamos la solicitud y vemos el resultado cuando el producto existe:
+
+````bash
+curl -v http://localhost:8080/api/v2/products/64dd57be7006723fb52178d4 | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+{
+  "id": "64dd57be7006723fb52178d4",
+  "name": "Sony Cámara HD",
+  "price": 680.6,
+  "createAt": "2023-08-16",
+  "image": null,
+  "category": {
+    "id": "64dd57be7006723fb52178cf",
+    "name": "Electrónico"
+  }
+}
+````
+
+Realizamos la solicitud para ver un producto que no existe:
+
+````bash
+curl -v http://localhost:8080/api/v2/products/64dd57be7006723fb5ddddd | jq
+
+--- Respuesta
+>
+< HTTP/1.1 404 Not Found
+< content-length: 0
+````
+
+## RouterFunction - POST crear producto
+
+Implementamos el método **handlerFunction** para poder guardar un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> createProduct(ServerRequest request) {
+        RequestPath requestPath = request.requestPath();
+        Mono<Product> productMono = request.bodyToMono(Product.class);
+        return productMono
+                .flatMap(product -> {
+                    if (product.getCreateAt() == null) {
+                        product.setCreateAt(LocalDate.now());
+                    }
+                    return this.productService.saveProduct(product);
+                })
+                .flatMap(productDB -> ServerResponse
+                        .created(URI.create(requestPath.value() + "/" + productDB.getId()))
+                        .bodyValue(productDB));
+    }
+}
+````
+
+Del código anterior, **lo que podemos resaltar es la forma cómo obtenemos los datos de la solicitud**. Recordemos que
+cuando usamos RestController el parámetro del método lo definimos de esta manera
+`createProduct(@RequestBody Product product)`, es decir usamos la anotación **@RequestBody** para que en automático el
+objeto json que se manda en la solicitud se pueble en el objeto product.
+
+Ahora, en nuestro caso, como estamos trabajando con **RouterFunction** no usamos la anotación **@RequestBody**, sino que
+para obtener los datos del producto enviado por la solicitud debemos usar lo siguiente
+`request.bodyToMono(Product.class)`, de esta manera el objeto enviado por la solicitud lo convertiremos a un **Mono**
+del tipo **Product**, es por esa razón que le pasamos el **Product.class**.
+
+Ahora toca definir la ruta para crear el producto, esta ruta debe apuntar a nuestro **handlerFunction createProduct()**:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Comprobamos el funcionamiento del endpoint:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Vidrio templado\", \"price\": 890.50, \"category\": {\"id\": \"64dd6bd69247a8627fb488e6\", \"name\": \"Decoración\"}}" http://localhost:8080/api/v2/products | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v2/products/64dd6c229247a8627fb488f5
+< Content-Type: application/json
+{
+  "id": "64dd6c229247a8627fb488f5",
+  "name": "Vidrio templado",
+  "price": 890.5,
+  "createAt": "2023-08-16",
+  "image": null,
+  "category": {
+    "id": "64dd6bd69247a8627fb488e6",
+    "name": "Decoración"
+  }
+}
+````
+
+## RouterFunction - PUT actualizar producto
+
+Implementamos nuestro método **handlerFunction** para actualizar un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> updateProduct(ServerRequest request) {
+        String id = request.pathVariable("id");
+        Mono<Product> productMono = request.bodyToMono(Product.class);
+        Mono<Product> productMonoDB = this.productService.findById(id);
+
+        return productMonoDB.zipWith(productMono, (productDB, product) -> {
+                    productDB.setName(product.getName());
+                    productDB.setPrice(product.getPrice());
+                    productDB.setCategory(product.getCategory());
+                    return productDB;
+                })
+                .flatMap(this.productService::saveProduct)
+                .flatMap(productDB -> ServerResponse.ok().bodyValue(productDB))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Del código anterior podemos resaltar el uso del operador **zipWith()**, `este operador nos permite combinar el resultado
+de este mono y otro en un objeto O arbitrario, según lo definido por la función combinadora proporcionada. Un error o
+una finalización vacía de cualquier fuente hará que la otra fuente se cancele y el Mono resultante se equivoque o se
+complete inmediatamente, respectivamente.`
+
+Definimos la ruta para nuestro handlerFunction **updateProduct()**:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Actualizamos un producto existente:
+
+````bash
+curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Lamparita\", \"price\": 100, \"category\": {\"id\": \"64de4000b67267238ad2cf1d\", \"name\": \"Muebles\"}}" http://localhost:8080/api/v2/products/64de4000b67267238ad2cf28 | jq
+ 
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+{
+  "id": "64de4000b67267238ad2cf28",
+  "name": "Lamparita",
+  "price": 100,
+  "createAt": "2023-08-17",
+  "image": null,
+  "category": {
+    "id": "64de4000b67267238ad2cf1d",
+    "name": "Muebles"
+  }
+}
+````
+
+Actualizando un producto que no existe en la base de datos:
+
+````bash
+curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Lamparita\", \"price\": 100, \"category\": {\"id\": \"64de4000b67267238ad2cf1d\", \"name\": \"Muebles\"}}" http://localhost:8080/api/v2/products/55555 | jq
+
+--- Respuesta
+< HTTP/1.1 404 Not Found
+< content-length: 0
+````
+
+## RouterFunction - DELETE eliminar producto
+
+Creamos el **método handlerFunction deleteProduct()** para eliminar un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> deleteProduct(ServerRequest request) {
+        String id = request.pathVariable("id");
+
+        return this.productService.findById(id)
+                .flatMap(productDB -> this.productService.delete(productDB).then(Mono.just(true)))
+                .flatMap(isDeleted -> ServerResponse.noContent().build())
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Del código anterior podemos resaltar este fragmento `this.productService.delete(productDB).then(Mono.just(true))`, lo
+que hace el método delete del product service es eliminar el producto y retornar un `Mono<Void>`, pero como ya vimos
+en otras secciones (en otros proyectos de este curso), para este caso particular nuestro **flatMap()** no debe retornar
+un `Mono<Void>`, pues si lo hace, automáticamente se saltará al operador `switchIfEmpty()` devolviéndonos siempre un
+**notFound()** a pesar de que sí eliminó el producto encontrado. Por lo tanto, luego de que el servicio elimine el
+producto le concatenamos el `.then()` para iniciar un nuevo flujo, el valor que retorne este nuevo flujo no importa,
+solo es como una bandera para que continúe al siguiente **flatMap()**.
+
+Eliminando un producto existente en la base de datos:
+
+````bash
+curl -v -X DELETE http://localhost:8080/api/v2/products/64de45243c2dc55512553eb5 | jq
+
+--- Respuesta
+< HTTP/1.1 204 No Content
+````
+
+Volviendo a eliminar el producto eliminado anteriormente:
+
+````bash
+ curl -v -X DELETE http://localhost:8080/api/v2/products/64de45243c2dc55512553eb5 | jq
+
+--- Respuesta
+< HTTP/1.1 404 Not Found
+````
+
+## RouterFunction - Subiendo solo imagen
+
+Implementamos el handlerFunction para subir una imagen a partir del identificador de un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* other property */
+    private final IProductService productService;
+    /* omitted code */
+
+    @Value("${config.uploads.path}")
+    private String uploadsPath;
+
+    public Mono<ServerResponse> uploadImageFile(ServerRequest request) {
+        String id = request.pathVariable("id");
+        Mono<Product> productMonoDB = this.productService.findById(id);
+
+        return request.multipartData()
+                .map(MultiValueMap::toSingleValueMap)
+                .map(stringPartMap -> stringPartMap.get("imageFile"))
+                .cast(FilePart.class)
+                .zipWith(productMonoDB, (filePart, productDB) -> {
+                    String imageName = UUID.randomUUID().toString() + "-" + filePart.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    productDB.setImage(imageName);
+
+                    return filePart.transferTo(new File(this.uploadsPath + productDB.getImage()))
+                            .then(this.productService.saveProduct(productDB));
+                })
+                .flatMap(productDBMono -> ServerResponse.ok().body(productDBMono, Product.class))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Implementamos la ruta para subir el archivo:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct)
+                .andRoute(RequestPredicates.DELETE("/api/v2/products/{id}"), productHandler::deleteProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/upload/{id}"), productHandler::uploadImageFile); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Subiéndole una imagen a un producto:
+
+````bash
+curl -v -X POST -H "Content-Type: multipart/form-data" -F "imageFile=@C:\Users\USUARIO\Downloads\camioneta.png" http://localhost:8080/api/v2/products/upload/64de52f05b9cad1022a48c09 | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+{
+  "id": "64de52f05b9cad1022a48c09",
+  "name": "Pintura Satinado",
+  "price": 78,
+  "createAt": "2023-08-17",
+  "image": "991547dd-24e3-40a9-a303-aa3165cf9f4e-camioneta.png",
+  "category": {
+    "id": "64de52f05b9cad1022a48c01",
+    "name": "Decoración"
+  }
+}
+````
+
+## RouterFunction - Subiendo imagen junto a su producto
+
+Creamos el handlerFunction para crear un producto y al mismo tiempo subir su imagen:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> createProductWithImage(ServerRequest request) {
+        RequestPath requestPath = request.requestPath();
+
+        Mono<Product> productMono = request.multipartData()
+                .map(stringPartMultiValueMap -> {
+                    Map<String, Part> singleValueMap = stringPartMultiValueMap.toSingleValueMap();
+                    FormFieldPart name = (FormFieldPart) singleValueMap.get("name");
+                    FormFieldPart price = (FormFieldPart) singleValueMap.get("price");
+                    FormFieldPart categoryId = (FormFieldPart) singleValueMap.get("category.id");
+                    FormFieldPart categoryName = (FormFieldPart) singleValueMap.get("category.name");
+
+                    Category category = new Category();
+                    category.setId(categoryId.value());
+                    category.setName(categoryName.value());
+
+                    return new Product(name.value(), Double.parseDouble(price.value()), category);
+                });
+
+
+        return request.multipartData()
+                .map(MultiValueMap::toSingleValueMap)
+                .map(stringPartMap -> stringPartMap.get("imageFile"))
+                .cast(FilePart.class)
+                .zipWith(productMono, (filePart, product) -> {
+                    String imageName = UUID.randomUUID().toString() + "-" + filePart.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    product.setImage(imageName);
+                    product.setCreateAt(LocalDate.now());
+
+                    return filePart.transferTo(new File(this.uploadsPath + product.getImage()))
+                            .then(this.productService.saveProduct(product));
+                })
+                .flatMap(productDBMono -> productDBMono.flatMap(product -> ServerResponse
+                        .created(URI.create(requestPath.value() + "/" + product.getId()))
+                        .bodyValue(product)));
+    }
+}
+````
+
+Recordemos lo que vimos en secciones anteriores:
+`Un Part es una representación de una parte en un request multipart/form-data. El origen de una
+solicitud multipart puede ser un formulario de navegador, en cuyo caso cada parte es un FormFieldPart o FilePart.`
+Entonces, en nuestro caso para poder guardar un producto junto a su imagen utilizamos el **multipart/form-data** enviado
+desde el cliente (navegador web, postman, etc.). Ahora, en nuestro código anterior separamos en dos partes para poder
+obtener, por un lado, los **datos del producto (FormFieldPart)** y, por otro lado, la **imagen enviada para ese producto
+(FilePart):**
+
+Miremos más de cerca el código que obtiene cada dato del producto en su correspondiente  **FormFieldPart**. El código
+`singleValueMap.get(...)` devuelve la interfaz `Part` que es muy genérica, esta interfaz es una representación de
+una parte en una solicitud `multipart/form-data`. Para poder ser más específicos es que esta interfaz `Part` lo
+casteamos a un `FormFieldPart` que vendría a ser una **especialización** de Part para un campo de formulario. Una vez
+casteado, podemos acceder a su valor utilizando el método **value()**:
+
+````
+Mono<Product> productMono = request.multipartData()
+    .map(stringPartMultiValueMap -> {
+        Map<String, Part> singleValueMap = stringPartMultiValueMap.toSingleValueMap();
+        FormFieldPart name = (FormFieldPart) singleValueMap.get("name");
+        FormFieldPart price = (FormFieldPart) singleValueMap.get("price");
+        FormFieldPart categoryId = (FormFieldPart) singleValueMap.get("category.id");
+        FormFieldPart categoryName = (FormFieldPart) singleValueMap.get("category.name");
+    
+        Category category = new Category();
+        category.setId(categoryId.value());
+        category.setName(categoryName.value());
+    
+        return new Product(name.value(), Double.parseDouble(price.value()), category);
+    });
+````
+
+Ahora observemos el fragmento de la segunda parte donde se obtiene la imagen. Si observamos la línea de código
+`stringPartMap.get("imageFile")` vemos que estamos accediendo nombre del campo con el que subimos la imagen, esto nos
+retorna la interfaz `Part`, pero al ser muy genérica utilizamos un segundo operador `cast(FilePart.class)` para
+castearlo a un `FilePart` ya que es un archivo de imagen. Finalmente, lo que sigue es similar a lo que ya vimos
+anteriormente en otros métodos:
+
+````
+return request.multipartData()
+    .map(MultiValueMap::toSingleValueMap)
+    .map(stringPartMap -> stringPartMap.get("imageFile"))
+    .cast(FilePart.class)
+    .zipWith(productMono, (filePart, product) -> {
+        String imageName = UUID.randomUUID().toString() + "-" + filePart.filename()
+                .replace(" ", "")
+                .replace(":", "")
+                .replace("\\", "");
+        product.setImage(imageName);
+        product.setCreateAt(LocalDate.now());
+
+        return filePart.transferTo(new File(this.uploadsPath + product.getImage()))
+                .then(this.productService.saveProduct(product));
+    })
+    .flatMap(productDBMono -> productDBMono.flatMap(product -> ServerResponse
+            .created(URI.create(requestPath.value() + "/" + product.getId()))
+            .bodyValue(product)));
+````
+
+La ruta para este nuevo handlerFunción será lo siguente:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct)
+                .andRoute(RequestPredicates.DELETE("/api/v2/products/{id}"), productHandler::deleteProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/upload/{id}"), productHandler::uploadImageFile)
+                .andRoute(RequestPredicates.POST("/api/v2/products/product-with-image"), productHandler::createProductWithImage); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Guardando un producto con su imagen:
+
+````bash
+curl -v -X POST -H "Content-Type: multipart/form-data" -F "name=casa de Ingeniero" -F "price=200000.00" -F "category.id=64de5e2d977bab27664b01fa" -F "category.name=Decoración" -F "imageFile=@C:\Users\USUARIO\Downloads\casa.png" http://localhost:8080/api/v2/products/product-with-image | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v2/products/product-with-image/64de5f02977bab27664b0209
+< Content-Type: application/json
+{
+  "id": "64de5f02977bab27664b0209",
+  "name": "casa de Ingeniero",
+  "price": 200000,
+  "createAt": "2023-08-17",
+  "image": "71634d03-2871-4d83-a1f4-08d9cd2a36ea-casa.png",
+  "category": {
+    "id": "64de5e2d977bab27664b01fa",
+    "name": "Decoración"
+  }
+}
+````
+
+## RouterFunction - Creando un handlerFunction con validación
+
+Cuando trabajamos con `@RestController` la validación es más automático, simplemente usamos la anotación `@Valid`
+mientras que **aquí, en un handlerFunction, es mucho más manual no tenemos anotaciones**, pero podemos inyectar el
+componente de Spring `Validator` y validar de forma manual.
+
+Empezamos creando un nuevo método handlerFunction para crear un producto, pero esta vez agregándole validaciones:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted property */
+    private final Validator validator;
+
+    /* omitted property */
+
+    public ProductHandler(IProductService productService, Validator validator) {
+        this.productService = productService;
+        this.validator = validator;
+    }
+
+    /* omitted code */
+    public Mono<ServerResponse> createProductWithValidation(ServerRequest request) {
+        RequestPath requestPath = request.requestPath();
+        Mono<Product> productMono = request.bodyToMono(Product.class);
+        return productMono
+                .flatMap(product -> {
+
+                    Errors errors = new BeanPropertyBindingResult(product, Product.class.getName());
+                    this.validator.validate(product, errors);
+
+                    if (errors.hasErrors()) {
+                        return Flux.fromIterable(errors.getFieldErrors())
+                                .map(fieldError -> String.format("[Validación 2] El campo %s %s", fieldError.getField(), fieldError.getDefaultMessage()))
+                                .collectList()
+                                .flatMap(listStings -> ServerResponse.badRequest().bodyValue(listStings));
+                    }
+
+                    if (product.getCreateAt() == null) {
+                        product.setCreateAt(LocalDate.now());
+                    }
+                    return this.productService.saveProduct(product)
+                            .flatMap(productDB -> ServerResponse
+                                    .created(URI.create(requestPath.value() + "/" + productDB.getId()))
+                                    .bodyValue(productDB));
+                });
+    }
+    /* omitted code */
+}
+````
+
+En el código anterior inyectamos la interface **Validator**, el que precisamente usamos dentro del **flatMap()** para
+hacer las validaciones.
+
+Este código es similar al que usamos en el método **createProduct()** que no realiza validación, pero con una pequeña
+modificación, mientras que en este nuevo método con validación agregamos este fragmento que lo diferencia:
+
+````
+Errors errors = new BeanPropertyBindingResult(product, Product.class.getName());
+this.validator.validate(product, errors);
+
+if (errors.hasErrors()) {
+    return Flux.fromIterable(errors.getFieldErrors())
+            .map(fieldError -> String.format("[Validación 2] El campo %s %s", fieldError.getField(), fieldError.getDefaultMessage()))
+            .collectList()
+            .flatMap(listStings -> ServerResponse.badRequest().bodyValue(listStings));
+}
+````
+
+Observamos que luego que se verifica que hay errores, simplemente retornamos un **ServerResponse** con la lista de los
+mensajes de errores.
+
+Agregamos la nueva ruta para este handlerFunction:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/create-product-with-validation"), productHandler::createProductWithValidation) //<-- Ruta implementada en este apartado
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct)
+                .andRoute(RequestPredicates.DELETE("/api/v2/products/{id}"), productHandler::deleteProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/upload/{id}"), productHandler::uploadImageFile)
+                .andRoute(RequestPredicates.POST("/api/v2/products/product-with-image"), productHandler::createProductWithImage);
+    }
+}
+````
+
+Registramos un producto sin el precio ni la categoría:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\"}" http://localhost:8080/api/v2/products/create-product-with-validation | jq
+
+--- Respuesta
+< HTTP/1.1 400 Bad Request
+< Content-Type: application/json
+[
+  "[Validación 2] El campo price must not be null",
+  "[Validación 2] El campo category must not be null"
+]
+````
+
+Registramos un producto sin el nombre ni datos de la categoría:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"price\": 890.50, \"category\": {}}" http://localhost:8080/api/v2/products/create-product-with-validation | jq
+
+--- Response
+< HTTP/1.1 400 Bad Request
+< Content-Type: application/json
+[
+  "[Validación 2] El campo name must not be blank",
+  "[Validación 2] El campo category.id must not be blank"
+]
+````
+
+Registramos exitosamente un producto:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \"price\": 890.50, \"category\": {\"id\": \"64de9a2e10d334754fdc6869\", \"name\": \"Decoración\"}}" http://localhost:8080/api/v2/products/create-product-with-validation | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v2/products/create-product-with-validation/64de9a7d10d334754fdc6878
+< Content-Type: application/json
+{
+  "id": "64de9a7d10d334754fdc6878",
+  "name": "Cocina",
+  "price": 890.5,
+  "createAt": "2023-08-17",
+  "image": null,
+  "category": {
+    "id": "64de9a2e10d334754fdc6869",
+    "name": "Decoración"
+  }
+}
+````
