@@ -1025,3 +1025,83 @@ curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Vidrio temp
   }
 }
 ````
+
+## RouterFunction - PUT actualizar producto
+
+Implementamos nuestro método **handlerFunction** para actualizar un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> updateProduct(ServerRequest request) {
+        String id = request.pathVariable("id");
+        Mono<Product> productMono = request.bodyToMono(Product.class);
+        Mono<Product> productMonoDB = this.productService.findById(id);
+
+        return productMonoDB.zipWith(productMono, (productDB, product) -> {
+                    productDB.setName(product.getName());
+                    productDB.setPrice(product.getPrice());
+                    productDB.setCategory(product.getCategory());
+                    return productDB;
+                })
+                .flatMap(this.productService::saveProduct)
+                .flatMap(productDB -> ServerResponse.ok().bodyValue(productDB))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Del código anterior podemos resaltar el uso del operador **zipWith()**, `este operador nos permite combinar el resultado
+de este mono y otro en un objeto O arbitrario, según lo definido por la función combinadora proporcionada. Un error o
+una finalización vacía de cualquier fuente hará que la otra fuente se cancele y el Mono resultante se equivoque o se
+complete inmediatamente, respectivamente.`
+
+Definimos la ruta para nuestro handlerFunction **updateProduct()**:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Actualizamos un producto existente:
+
+````bash
+curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Lamparita\", \"price\": 100, \"category\": {\"id\": \"64de4000b67267238ad2cf1d\", \"name\": \"Muebles\"}}" http://localhost:8080/api/v2/products/64de4000b67267238ad2cf28 | jq
+ 
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+{
+  "id": "64de4000b67267238ad2cf28",
+  "name": "Lamparita",
+  "price": 100,
+  "createAt": "2023-08-17",
+  "image": null,
+  "category": {
+    "id": "64de4000b67267238ad2cf1d",
+    "name": "Muebles"
+  }
+}
+````
+
+Actualizando un producto que no existe en la base de datos:
+
+````bash
+curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Lamparita\", \"price\": 100, \"category\": {\"id\": \"64de4000b67267238ad2cf1d\", \"name\": \"Muebles\"}}" http://localhost:8080/api/v2/products/55555 | jq
+
+--- Respuesta
+< HTTP/1.1 404 Not Found
+< content-length: 0
+````
