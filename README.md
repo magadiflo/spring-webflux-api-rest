@@ -1151,3 +1151,82 @@ Volviendo a eliminar el producto eliminado anteriormente:
 --- Respuesta
 < HTTP/1.1 404 Not Found
 ````
+
+## RouterFunction - Subiendo solo imagen
+
+Implementamos el handlerFunction para subir una imagen a partir del identificador de un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* other property */
+    private final IProductService productService;
+    /* omitted code */
+
+    @Value("${config.uploads.path}")
+    private String uploadsPath;
+
+    public Mono<ServerResponse> uploadImageFile(ServerRequest request) {
+        String id = request.pathVariable("id");
+        Mono<Product> productMonoDB = this.productService.findById(id);
+
+        return request.multipartData()
+                .map(MultiValueMap::toSingleValueMap)
+                .map(stringPartMap -> stringPartMap.get("imageFile"))
+                .cast(FilePart.class)
+                .zipWith(productMonoDB, (filePart, productDB) -> {
+                    String imageName = UUID.randomUUID().toString() + "-" + filePart.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    productDB.setImage(imageName);
+
+                    return filePart.transferTo(new File(this.uploadsPath + productDB.getImage()))
+                            .then(this.productService.saveProduct(productDB));
+                })
+                .flatMap(productDBMono -> ServerResponse.ok().body(productDBMono, Product.class))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Implementamos la ruta para subir el archivo:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct)
+                .andRoute(RequestPredicates.DELETE("/api/v2/products/{id}"), productHandler::deleteProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/upload/{id}"), productHandler::uploadImageFile); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Subiéndole una imagen a un producto:
+
+````bash
+curl -v -X POST -H "Content-Type: multipart/form-data" -F "imageFile=@C:\Users\USUARIO\Downloads\camioneta.png" http://localhost:8080/api/v2/products/upload/64de52f05b9cad1022a48c09 | jq
+
+--- Respuesta
+< HTTP/1.1 200 OK
+< Content-Type: application/json
+{
+  "id": "64de52f05b9cad1022a48c09",
+  "name": "Pintura Satinado",
+  "price": 78,
+  "createAt": "2023-08-17",
+  "image": "991547dd-24e3-40a9-a303-aa3165cf9f4e-camioneta.png",
+  "category": {
+    "id": "64de52f05b9cad1022a48c01",
+    "name": "Decoración"
+  }
+}
+````
