@@ -2,6 +2,7 @@ package com.magadiflo.api.rest.app.handlers;
 
 import com.magadiflo.api.rest.app.models.documents.Product;
 import com.magadiflo.api.rest.app.models.services.IProductService;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.ServerRequest;
@@ -61,6 +62,15 @@ public class ProductHandler {
                 })
                 .flatMap(this.productService::saveProduct)
                 .flatMap(productDB -> ServerResponse.ok().bodyValue(productDB))
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+
+    public Mono<ServerResponse> deleteProduct(ServerRequest request) {
+        String id = request.pathVariable("id");
+
+        return this.productService.findById(id)
+                .flatMap(productDB -> this.productService.delete(productDB).then(Mono.just(true)))
+                .flatMap(isDeleted -> ServerResponse.noContent().build())
                 .switchIfEmpty(ServerResponse.notFound().build());
     }
 }

@@ -1105,3 +1105,49 @@ curl -v -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Lamparita\",
 < HTTP/1.1 404 Not Found
 < content-length: 0
 ````
+
+## RouterFunction - DELETE eliminar producto
+
+Creamos el **método handlerFunction deleteProduct()** para eliminar un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> deleteProduct(ServerRequest request) {
+        String id = request.pathVariable("id");
+
+        return this.productService.findById(id)
+                .flatMap(productDB -> this.productService.delete(productDB).then(Mono.just(true)))
+                .flatMap(isDeleted -> ServerResponse.noContent().build())
+                .switchIfEmpty(ServerResponse.notFound().build());
+    }
+}
+````
+
+Del código anterior podemos resaltar este fragmento `this.productService.delete(productDB).then(Mono.just(true))`, lo
+que hace el método delete del product service es eliminar el producto y retornar un `Mono<Void>`, pero como ya vimos
+en otras secciones (en otros proyectos de este curso), para este caso particular nuestro **flatMap()** no debe retornar
+un `Mono<Void>`, pues si lo hace, automáticamente se saltará al operador `switchIfEmpty()` devolviéndonos siempre un
+**notFound()** a pesar de que sí eliminó el producto encontrado. Por lo tanto, luego de que el servicio elimine el
+producto le concatenamos el `.then()` para iniciar un nuevo flujo, el valor que retorne este nuevo flujo no importa,
+solo es como una bandera para que continúe al siguiente **flatMap()**.
+
+Eliminando un producto existente en la base de datos:
+
+````bash
+curl -v -X DELETE http://localhost:8080/api/v2/products/64de45243c2dc55512553eb5 | jq
+
+--- Respuesta
+< HTTP/1.1 204 No Content
+````
+
+Volviendo a eliminar el producto eliminado anteriormente:
+
+````bash
+ curl -v -X DELETE http://localhost:8080/api/v2/products/64de45243c2dc55512553eb5 | jq
+
+--- Respuesta
+< HTTP/1.1 404 Not Found
+````
