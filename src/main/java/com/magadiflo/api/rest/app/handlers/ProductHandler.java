@@ -1,9 +1,12 @@
 package com.magadiflo.api.rest.app.handlers;
 
+import com.magadiflo.api.rest.app.models.documents.Category;
 import com.magadiflo.api.rest.app.models.documents.Product;
 import com.magadiflo.api.rest.app.models.services.IProductService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.http.codec.multipart.FormFieldPart;
+import org.springframework.http.codec.multipart.Part;
 import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.util.MultiValueMap;
@@ -15,6 +18,7 @@ import reactor.core.publisher.Mono;
 import java.io.File;
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.UUID;
 
 @Component
@@ -101,6 +105,45 @@ public class ProductHandler {
                 })
                 .flatMap(productDBMono -> ServerResponse.ok().body(productDBMono, Product.class))
                 .switchIfEmpty(ServerResponse.notFound().build());
+    }
+
+    public Mono<ServerResponse> createProductWithImage(ServerRequest request) {
+        RequestPath requestPath = request.requestPath();
+
+        Mono<Product> productMono = request.multipartData()
+                .map(stringPartMultiValueMap -> {
+                    Map<String, Part> singleValueMap = stringPartMultiValueMap.toSingleValueMap();
+                    FormFieldPart name = (FormFieldPart) singleValueMap.get("name");
+                    FormFieldPart price = (FormFieldPart) singleValueMap.get("price");
+                    FormFieldPart categoryId = (FormFieldPart) singleValueMap.get("category.id");
+                    FormFieldPart categoryName = (FormFieldPart) singleValueMap.get("category.name");
+
+                    Category category = new Category();
+                    category.setId(categoryId.value());
+                    category.setName(categoryName.value());
+
+                    return new Product(name.value(), Double.parseDouble(price.value()), category);
+                });
+
+
+        return request.multipartData()
+                .map(MultiValueMap::toSingleValueMap)
+                .map(stringPartMap -> stringPartMap.get("imageFile"))
+                .cast(FilePart.class)
+                .zipWith(productMono, (filePart, product) -> {
+                    String imageName = UUID.randomUUID().toString() + "-" + filePart.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    product.setImage(imageName);
+                    product.setCreateAt(LocalDate.now());
+
+                    return filePart.transferTo(new File(this.uploadsPath + product.getImage()))
+                            .then(this.productService.saveProduct(product));
+                })
+                .flatMap(productDBMono -> productDBMono.flatMap(product -> ServerResponse
+                        .created(URI.create(requestPath.value() + "/" + product.getId()))
+                        .bodyValue(product)));
     }
 }
 

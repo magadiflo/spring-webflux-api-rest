@@ -1230,3 +1230,153 @@ curl -v -X POST -H "Content-Type: multipart/form-data" -F "imageFile=@C:\Users\U
   }
 }
 ````
+
+## RouterFunction - Subiendo imagen junto a su producto
+
+Creamos el handlerFunction para crear un producto y al mismo tiempo subir su imagen:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> createProductWithImage(ServerRequest request) {
+        RequestPath requestPath = request.requestPath();
+
+        Mono<Product> productMono = request.multipartData()
+                .map(stringPartMultiValueMap -> {
+                    Map<String, Part> singleValueMap = stringPartMultiValueMap.toSingleValueMap();
+                    FormFieldPart name = (FormFieldPart) singleValueMap.get("name");
+                    FormFieldPart price = (FormFieldPart) singleValueMap.get("price");
+                    FormFieldPart categoryId = (FormFieldPart) singleValueMap.get("category.id");
+                    FormFieldPart categoryName = (FormFieldPart) singleValueMap.get("category.name");
+
+                    Category category = new Category();
+                    category.setId(categoryId.value());
+                    category.setName(categoryName.value());
+
+                    return new Product(name.value(), Double.parseDouble(price.value()), category);
+                });
+
+
+        return request.multipartData()
+                .map(MultiValueMap::toSingleValueMap)
+                .map(stringPartMap -> stringPartMap.get("imageFile"))
+                .cast(FilePart.class)
+                .zipWith(productMono, (filePart, product) -> {
+                    String imageName = UUID.randomUUID().toString() + "-" + filePart.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    product.setImage(imageName);
+                    product.setCreateAt(LocalDate.now());
+
+                    return filePart.transferTo(new File(this.uploadsPath + product.getImage()))
+                            .then(this.productService.saveProduct(product));
+                })
+                .flatMap(productDBMono -> productDBMono.flatMap(product -> ServerResponse
+                        .created(URI.create(requestPath.value() + "/" + product.getId()))
+                        .bodyValue(product)));
+    }
+}
+````
+
+Recordemos lo que vimos en secciones anteriores:
+`Un Part es una representación de una parte en un request multipart/form-data. El origen de una
+solicitud multipart puede ser un formulario de navegador, en cuyo caso cada parte es un FormFieldPart o FilePart.`
+Entonces, en nuestro caso para poder guardar un producto junto a su imagen utilizamos el **multipart/form-data** enviado
+desde el cliente (navegador web, postman, etc.). Ahora, en nuestro código anterior separamos en dos partes para poder
+obtener, por un lado, los **datos del producto (FormFieldPart)** y, por otro lado, la **imagen enviada para ese producto
+(FilePart):**
+
+Miremos más de cerca el código que obtiene cada dato del producto en su correspondiente  **FormFieldPart**. El código
+`singleValueMap.get(...)` devuelve la interfaz `Part` que es muy genérica, esta interfaz es una representación de
+una parte en una solicitud `multipart/form-data`. Para poder ser más específicos es que esta interfaz `Part` lo
+casteamos a un `FormFieldPart` que vendría a ser una **especialización** de Part para un campo de formulario. Una vez
+casteado, podemos acceder a su valor utilizando el método **value()**:
+
+````
+Mono<Product> productMono = request.multipartData()
+    .map(stringPartMultiValueMap -> {
+        Map<String, Part> singleValueMap = stringPartMultiValueMap.toSingleValueMap();
+        FormFieldPart name = (FormFieldPart) singleValueMap.get("name");
+        FormFieldPart price = (FormFieldPart) singleValueMap.get("price");
+        FormFieldPart categoryId = (FormFieldPart) singleValueMap.get("category.id");
+        FormFieldPart categoryName = (FormFieldPart) singleValueMap.get("category.name");
+    
+        Category category = new Category();
+        category.setId(categoryId.value());
+        category.setName(categoryName.value());
+    
+        return new Product(name.value(), Double.parseDouble(price.value()), category);
+    });
+````
+
+Ahora observemos el fragmento de la segunda parte donde se obtiene la imagen. Si observamos la línea de código
+`stringPartMap.get("imageFile")` vemos que estamos accediendo nombre del campo con el que subimos la imagen, esto nos
+retorna la interfaz `Part`, pero al ser muy genérica utilizamos un segundo operador `cast(FilePart.class)` para
+castearlo a un `FilePart` ya que es un archivo de imagen. Finalmente, lo que sigue es similar a lo que ya vimos
+anteriormente en otros métodos:
+
+````
+return request.multipartData()
+    .map(MultiValueMap::toSingleValueMap)
+    .map(stringPartMap -> stringPartMap.get("imageFile"))
+    .cast(FilePart.class)
+    .zipWith(productMono, (filePart, product) -> {
+        String imageName = UUID.randomUUID().toString() + "-" + filePart.filename()
+                .replace(" ", "")
+                .replace(":", "")
+                .replace("\\", "");
+        product.setImage(imageName);
+        product.setCreateAt(LocalDate.now());
+
+        return filePart.transferTo(new File(this.uploadsPath + product.getImage()))
+                .then(this.productService.saveProduct(product));
+    })
+    .flatMap(productDBMono -> productDBMono.flatMap(product -> ServerResponse
+            .created(URI.create(requestPath.value() + "/" + product.getId()))
+            .bodyValue(product)));
+````
+
+La ruta para este nuevo handlerFunción será lo siguente:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct)
+                .andRoute(RequestPredicates.PUT("/api/v2/products/{id}"), productHandler::updateProduct)
+                .andRoute(RequestPredicates.DELETE("/api/v2/products/{id}"), productHandler::deleteProduct)
+                .andRoute(RequestPredicates.POST("/api/v2/products/upload/{id}"), productHandler::uploadImageFile)
+                .andRoute(RequestPredicates.POST("/api/v2/products/product-with-image"), productHandler::createProductWithImage); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Guardando un producto con su imagen:
+
+````bash
+curl -v -X POST -H "Content-Type: multipart/form-data" -F "name=casa de Ingeniero" -F "price=200000.00" -F "category.id=64de5e2d977bab27664b01fa" -F "category.name=Decoración" -F "imageFile=@C:\Users\USUARIO\Downloads\casa.png" http://localhost:8080/api/v2/products/product-with-image | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v2/products/product-with-image/64de5f02977bab27664b0209
+< Content-Type: application/json
+{
+  "id": "64de5f02977bab27664b0209",
+  "name": "casa de Ingeniero",
+  "price": 200000,
+  "createAt": "2023-08-17",
+  "image": "71634d03-2871-4d83-a1f4-08d9cd2a36ea-casa.png",
+  "category": {
+    "id": "64de5e2d977bab27664b01fa",
+    "name": "Decoración"
+  }
+}
+````
