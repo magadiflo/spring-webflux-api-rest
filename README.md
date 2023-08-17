@@ -951,3 +951,77 @@ curl -v http://localhost:8080/api/v2/products/64dd57be7006723fb5ddddd | jq
 < HTTP/1.1 404 Not Found
 < content-length: 0
 ````
+
+## RouterFunction - POST crear producto
+
+Implementamos el método **handlerFunction** para poder guardar un producto:
+
+````java
+
+@Component
+public class ProductHandler {
+    /* omitted code */
+    public Mono<ServerResponse> createProduct(ServerRequest request) {
+        RequestPath requestPath = request.requestPath();
+        Mono<Product> productMono = request.bodyToMono(Product.class);
+        return productMono
+                .flatMap(product -> {
+                    if (product.getCreateAt() == null) {
+                        product.setCreateAt(LocalDate.now());
+                    }
+                    return this.productService.saveProduct(product);
+                })
+                .flatMap(productDB -> ServerResponse
+                        .created(URI.create(requestPath.value() + "/" + productDB.getId()))
+                        .bodyValue(productDB));
+    }
+}
+````
+
+Del código anterior, **lo que podemos resaltar es la forma cómo obtenemos los datos de la solicitud**. Recordemos que
+cuando usamos RestController el parámetro del método lo definimos de esta manera
+`createProduct(@RequestBody Product product)`, es decir usamos la anotación **@RequestBody** para que en automático el
+objeto json que se manda en la solicitud se pueble en el objeto product.
+
+Ahora, en nuestro caso, como estamos trabajando con **RouterFunction** no usamos la anotación **@RequestBody**, sino que
+para obtener los datos del producto enviado por la solicitud debemos usar lo siguiente
+`request.bodyToMono(Product.class)`, de esta manera el objeto enviado por la solicitud lo convertiremos a un **Mono**
+del tipo **Product**, es por esa razón que le pasamos el **Product.class**.
+
+Ahora toca definir la ruta para crear el producto, esta ruta debe apuntar a nuestro **handlerFunction createProduct()**:
+
+````java
+
+@Configuration
+public class RouterFunctionConfig {
+
+    @Bean
+    public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
+        return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct); //<-- Ruta implementada en este apartado
+    }
+}
+````
+
+Comprobamos el funcionamiento del endpoint:
+
+````bash
+curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Vidrio templado\", \"price\": 890.50, \"category\": {\"id\": \"64dd6bd69247a8627fb488e6\", \"name\": \"Decoración\"}}" http://localhost:8080/api/v2/products | jq
+
+--- Respuesta
+< HTTP/1.1 201 Created
+< Location: /api/v2/products/64dd6c229247a8627fb488f5
+< Content-Type: application/json
+{
+  "id": "64dd6c229247a8627fb488f5",
+  "name": "Vidrio templado",
+  "price": 890.5,
+  "createAt": "2023-08-16",
+  "image": null,
+  "category": {
+    "id": "64dd6bd69247a8627fb488e6",
+    "name": "Decoración"
+  }
+}
+````

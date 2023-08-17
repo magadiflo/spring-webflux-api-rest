@@ -14,6 +14,7 @@ public class RouterFunctionConfig {
     @Bean
     public RouterFunction<ServerResponse> routes(ProductHandler productHandler) {
         return RouterFunctions.route(RequestPredicates.GET("/api/v2/products").or(RequestPredicates.GET("/api/v3/products")), productHandler::listAllProducts)
-                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails);
+                .andRoute(RequestPredicates.GET("/api/v2/products/{id}"), productHandler::showDetails)
+                .andRoute(RequestPredicates.POST("/api/v2/products"), productHandler::createProduct);
     }
 }
