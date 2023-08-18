@@ -93,4 +93,33 @@ class RouterFunctionConfigTest {
                     Assertions.assertEquals(product.getCategory().getName(), productTest.getCategory().getName());
                 });
     }
+
+    @Test
+    void should_update_a_product() {
+        Product productToUpdateDB = this.productService.findByName("Celular Huawey").block();
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+
+        Product productRequest = new Product("Sillón 3 cuerpos", 1600.00, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.put()
+                .uri("/api/v2/products/{id}", Collections.singletonMap("id", productToUpdateDB.getId()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(productRequest)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(productRequest.getName(), productTest.getName());
+                    Assertions.assertEquals(productRequest.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(productRequest.getCategory());
+                    Assertions.assertEquals(productRequest.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(productRequest.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
 }
