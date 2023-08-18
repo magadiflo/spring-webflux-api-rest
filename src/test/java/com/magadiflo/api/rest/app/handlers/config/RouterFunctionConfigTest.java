@@ -122,4 +122,16 @@ class RouterFunctionConfigTest {
                     Assertions.assertEquals(productRequest.getCategory().getName(), productTest.getCategory().getName());
                 });
     }
+
+    @Test
+    void should_delete_a_product() {
+        Product productDB = this.productService.findByName("Silla de oficina").block();
+        WebTestClient.ResponseSpec response = this.webTestClient.delete()
+                .uri("/api/v2/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .exchange();
+
+        response.expectStatus().isNoContent()
+                .expectBody()
+                .isEmpty();
+    }
 }

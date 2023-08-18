@@ -1797,3 +1797,35 @@ class RouterFunctionConfigTest {
     }
 }
 ````
+
+## RouterFunction - Test endpoint eliminar producto
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted code */
+    @Test
+    void should_delete_a_product() {
+        Product productDB = this.productService.findByName("Silla de oficina").block();
+        WebTestClient.ResponseSpec response = this.webTestClient.delete()
+                .uri("/api/v2/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .exchange();
+
+        response.expectStatus().isNoContent()
+                .expectBody()
+                .isEmpty();
+    }
+}
+````
+
+**NOTA**
+
+> Como los métodos se ejecutan de manera aleatoria, es probable que en alguna ejecución fallen los métodos del listar,
+> ya que todos los test están trabajando con los mismos registros de la base de datos, es decir, si primero se ejecuta
+> este test de eliminar, disminuirá la cantidad de registros en la base de datos por lo que al momento de ejecutar los
+> test de listar productos los assertions fallarán pues no encontrarán la cantidad de productos definidos en esos test.
+>
+> Pero hasta el momento, he ejecutado los test varias veces y todos han pasado correctamente. No obstante, podríamos
+> usar la anotación **@Order** para darle un orden de ejecución a los test y así estar seguros de la ejecución de los
+> tests.
