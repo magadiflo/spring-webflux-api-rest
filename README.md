@@ -1963,3 +1963,60 @@ class ProductControllerTest {
 
 }
 ````
+
+## Mock - Ejecutando tests en un entorno simulado
+
+**Ejecutaremos los tests sin levantar un servidor real** que esté desplegado en algún puerto HTTP o que haga un request
+y response real, sino más bien simular el servidor y por consiguiente simular las request y responses, eso sería
+gracias al WebEnvironment.MOCK.
+
+Además, **siempre que usemos WebEnvironment.MOCK debemos acompañarlo con la anotación @AutoConfigureWebTestClient**
+para poder importar la autoconfiguración, el contexto de spring.
+
+La anotación **@AutoConfigureWebTestClient se utiliza para configurar un cliente web para realizar solicitudes HTTP
+simuladas** al controlador, y @SpringBootTest se utiliza para cargar el contexto de Spring para realizar pruebas de
+integración. En este caso, `webEnvironment = SpringBootTest.WebEnvironment.MOCK` indica que **se utilizará un entorno
+simulado (mock) en lugar de un servidor web real** para ejecutar las pruebas. En otras palabras, con esa configuración
+**Spring Boot no inicia un servidor web real para las pruebas**. En su lugar, crea un contexto de aplicación simulado
+que permite realizar pruebas de integración sin la necesidad de un servidor web en funcionamiento. Esto puede ser útil
+para realizar pruebas más rápidas y aisladas, ya que no se requiere la infraestructura completa de un servidor web real.
+
+Crearemos una clase de prueba a partir de nuestro controlador ProductController y copiaremos todos los test, tal cual,
+lo tenemos en los otras clases de prueba, lo único que cambiará será que agregamos la anotación
+`@AutoConfigureWebTestClient` y la configuración de `RANDOM_PORT` la cambiamos a `MOCK`.
+
+````java
+
+@AutoConfigureWebTestClient //<-- Agregamos anotación
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK) //<-- Cambiamos de RANDOM_PORT a MOCK
+class ProductControllerMockTest {
+
+    /**
+     * Podemos hacer uso de WebTestClient, teniendo el WebEnvironment.MOCK, 
+     * gracias a la anotación @AutoConfigureWebTestClient
+     */
+    @Autowired
+    private WebTestClient webTestClient;
+
+    @Autowired
+    private IProductService productService;
+
+    /**
+     *  Mismo código que usamos en la clase de prueba
+     *  ProductControllerTest o RouterFunctionConfigTest
+     */
+}
+````
+
+### Probando ProductController con  WebEnvironment.RANDOM_PORT
+
+Ejecutamos el test del ProductController como hemos venido trabajando desde el inicio de esta sección donde configuramos
+el **WebEnvironment.RANDOM_PORT** y veamos el resultado:
+
+![random port](./assets/random-port.png)
+
+### Probando ProductControllerMockTest con  WebEnvironment.MOCK
+
+Ahora ejecutemos los test donde configuramos el **WebEnvironment.MOCK**:
+
+![mock](./assets/mock.png)
