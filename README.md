@@ -1829,3 +1829,137 @@ class RouterFunctionConfigTest {
 > Pero hasta el momento, he ejecutado los test varias veces y todos han pasado correctamente. No obstante, podríamos
 > usar la anotación **@Order** para darle un orden de ejecución a los test y así estar seguros de la ejecución de los
 > tests.
+
+## RestController - Métodos test para probar el controlador @RestController
+
+Nos posicionaremos dentro de la clase de controlador **ProductController** y presionando `ctrl + shift + T` damos en
+crear un nuevo test para crear la clase de test a partir de este controlador. Una vez creado el archivo de test,
+copiamos todos los test desarrollados en el **RouterFunctionConfigTest** y lo pegamos en nuestra nueva clase de test.
+Finalmente, **cambiamos la versión del endpoint** `de v2 a v1` para que los test apunten al endpoint definido en nuestro
+**ProductController**:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class ProductControllerTest {
+    @Autowired
+    private WebTestClient webTestClient;
+    @Autowired
+    private IProductService productService;
+
+    @Test
+    void should_list_all_products() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v1/products") //<-- Apuntando al endpoint de ProductController
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .hasSize(14);
+    }
+
+    @Test
+    void should_list_all_products_with_consumeWith() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v1/products")
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .consumeWith(listEntityExchangeResult -> {
+                    List<Product> products = listEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(products);
+                    Assertions.assertFalse(products.isEmpty());
+                    Assertions.assertEquals(14, products.size());
+                });
+    }
+
+    @Test
+    void should_show_details_of_a_product() {
+        Product productDB = this.productService.findByName("Celular Huawey").block();
+
+        WebTestClient.ResponseSpec response = this.webTestClient.get()
+                .uri("/api/v1/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody()
+                .jsonPath("$.id").isNotEmpty()
+                .jsonPath("$.name").isEqualTo("Celular Huawey");
+    }
+
+    @Test
+    void should_create_a_product() {
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+        Product product = new Product("Escoba", 25.70, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.post()
+                .uri("/api/v1/products")
+                .contentType(MediaType.APPLICATION_JSON)        //<-- Request
+                .accept(MediaType.APPLICATION_JSON)    //<-- Response
+                .bodyValue(product)
+                .exchange();
+
+        response.expectStatus().isCreated()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(product.getName(), productTest.getName());
+                    Assertions.assertEquals(product.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(product.getCategory());
+                    Assertions.assertEquals(product.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(product.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
+
+    @Test
+    void should_update_a_product() {
+        Product productToUpdateDB = this.productService.findByName("Celular Huawey").block();
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+
+        Product productRequest = new Product("Sillón 3 cuerpos", 1600.00, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.put()
+                .uri("/api/v1/products/{id}", Collections.singletonMap("id", productToUpdateDB.getId()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(productRequest)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(productRequest.getName(), productTest.getName());
+                    Assertions.assertEquals(productRequest.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(productRequest.getCategory());
+                    Assertions.assertEquals(productRequest.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(productRequest.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
+
+    @Test
+    void should_delete_a_product() {
+        Product productDB = this.productService.findByName("Silla de oficina").block();
+        WebTestClient.ResponseSpec response = this.webTestClient.delete()
+                .uri("/api/v1/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .exchange();
+
+        response.expectStatus().isNoContent()
+                .expectBody()
+                .isEmpty();
+    }
+
+}
+````
