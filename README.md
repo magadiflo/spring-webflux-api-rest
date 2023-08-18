@@ -1587,3 +1587,34 @@ Ejecutamos el test simulando un error:
 Ejecutamos el test correctamente:
 
 ![test-listar-éxito](./assets/test-listar-exito.png)
+
+## RouterFunction - Test endpoint listar usando consumeWith()
+
+Podemos utilizar el **consumeWith()** para que en su interior realicemos las pruebas usando los **Assertions** de
+**JUnit**, entonces utilizando el mismo código que hicimos en el apartado anterior realizaremos un pequeño cambio
+para utilizar el **consumeWith()**:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted code */
+    @Test
+    void should_list_all_products_with_consumeWith() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v2/products")
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .consumeWith(listEntityExchangeResult -> {
+                    List<Product> products = listEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(products);
+                    Assertions.assertFalse(products.isEmpty());
+                    Assertions.assertEquals(14, products.size());
+                });
+    }
+}
+````
