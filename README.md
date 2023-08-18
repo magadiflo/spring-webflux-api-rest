@@ -1524,3 +1524,66 @@ curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \
   }
 }
 ````
+
+---
+
+# Sección: JUnit: Test a nuestros endpoints usando WebTestClient
+
+---
+
+Para mayor información sobre **Test en Spring Boot** ir al repositorio
+[**spring-boot-test**](https://github.com/magadiflo/spring-boot-test.git).
+
+A continuación muestro brevemente la definición de algunas anotaciones y/o propiedades que usaremos en las clases de
+test:
+
+- `@SpringBootTest()`, arranca el contexto completo de la aplicación, lo que significa que podemos usar el @Autowired
+  para poder usar inyección de dependencia. Inicia un servidor embebido, crea un entorno web y, a continuación, permite
+  a los métodos @Test realizar pruebas de integración.
+- `webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT`, crea un contexto de aplicación web (reactivo o basado en
+  servlet) y establece una propiedad de entorno server.port=0 **(que generalmente activa la escucha en un puerto
+  aleatorio).** A menudo se usa junto con un campo inyectado @LocalServerPort en la prueba. **Proporciona un entorno web
+  real.**
+- **WebTestClient**, es un cliente HTTP para probar servidores web, utiliza WebClient internamente para realizar
+  solicitudes y, al mismo tiempo, proporciona una API fluida para verificar las respuestas.
+
+## RouterFunction - Test endpoint listar
+
+Realizaremos las pruebas a los endpoints trabajados con **RouterFunction**. Esta forma de trabajar los endpoints nos
+obligó a crear las clases `@Configuración RouterFunctionConfig` que contiene los endpoints de las solicitudes http y
+su **handlerFunction** correspondiente y la clase `@Component ProductHandler` que contiene la implementación de los
+**handlerFunctions**. Teniendo en cuenta lo anterior, crearemos la clase de prueba a partir de la
+clase `RouterFunctionConfig` porque contiene los **endpoints** a testear:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    @Autowired
+    private WebTestClient webTestClient;
+
+    @Test
+    void should_list_all_products() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v2/products")
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .hasSize(14);
+    }
+}
+````
+
+Del código anterior podemos ver que **estamos haciendo una petición real**
+`(real por esta configuración @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT))` al endpoint
+que trabajamos en la sección del **RouterFunction**: `/api/v2/products`.
+
+Ejecutamos el test simulando un error:
+
+![test-listar-error](./assets/test-listar-error.png)
+
+Ejecutamos el test correctamente:
+
+![test-listar-éxito](./assets/test-listar-exito.png)
