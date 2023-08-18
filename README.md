@@ -1618,3 +1618,77 @@ class RouterFunctionConfigTest {
     }
 }
 ````
+
+## RouterFunction - Test endpoint ver detalle
+
+Para esta prueba utilizaremos el **jsonPath()** para hacer las comprobaciones. Pero antes es necesario agregar un
+método personalizado al repositorio de Producto, ya que siempre que levantemos el proyecto los ids de los productos
+almacenados en MongoDB serán aleatorios, no son siempre el mismo, por tal razón es necesario implementar un método
+adicional en el repositorio para buscar al producto por su nombre y luego usar su id para hacer la prueba al endpoint
+para ver los detalles por id:
+
+A continuación vemos dos formas de crear el método personalizado, uno utilizando el **query method**, es decir la
+consulta a la base de datos se hará usando la convención utilizada al nombrar al método y la otra utilizando la
+anotación **@Query()** donde definimos la consulta personalizada, en nuestro caso podemos utilizar cualquiera de los
+dos:
+
+````java
+public interface IProductRepository extends ReactiveMongoRepository<Product, String> {
+    Mono<Product> findByName(String name);
+
+    @Query("{'name' : ?0}")
+    Mono<Product> findProduct(String name);
+}
+````
+
+En la interfaz del servicio del producto agregamos un nuevo método:
+
+````java
+public interface IProductService {
+    /* omitted code */
+    Mono<Product> findByName(String name);
+}
+````
+
+Implementamos el método anterior en el servicio del producto concreto:
+
+````java
+
+@Service
+public class ProductServiceImpl implements IProductService {
+    /* omitted code */
+    @Override
+    public Mono<Product> findByName(String name) {
+        return this.productRepository.findProduct(name);
+    }
+}
+````
+
+Ahora implementamos nuestro método de prueba:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted property */
+    @Autowired
+    private IProductService productService;
+
+    /* omitted code */
+    @Test
+    void should_show_details_of_a_product() {
+        Product productDB = this.productService.findByName("Celular Huawey").block();
+
+        WebTestClient.ResponseSpec response = this.webTestClient.get()
+                .uri("/api/v2/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody()
+                .jsonPath("$.id").isNotEmpty()
+                .jsonPath("$.name").isEqualTo("Celular Huawey");
+    }
+}
+````
