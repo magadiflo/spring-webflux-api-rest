@@ -1524,3 +1524,499 @@ curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \
   }
 }
 ````
+
+---
+
+# Sección: JUnit: Test a nuestros endpoints usando WebTestClient
+
+---
+
+Para mayor información sobre **Test en Spring Boot** ir al repositorio
+[**spring-boot-test**](https://github.com/magadiflo/spring-boot-test.git).
+
+A continuación muestro brevemente la definición de algunas anotaciones y/o propiedades que usaremos en las clases de
+test:
+
+- `@SpringBootTest()`, arranca el contexto completo de la aplicación, lo que significa que podemos usar el @Autowired
+  para poder usar inyección de dependencia. Inicia un servidor embebido, crea un entorno web y, a continuación, permite
+  a los métodos @Test realizar pruebas de integración.
+- `webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT`, crea un contexto de aplicación web (reactivo o basado en
+  servlet) y establece una propiedad de entorno server.port=0 **(que generalmente activa la escucha en un puerto
+  aleatorio).** A menudo se usa junto con un campo inyectado @LocalServerPort en la prueba. **Proporciona un entorno web
+  real.**
+- **WebTestClient**, es un cliente HTTP para probar servidores web, utiliza WebClient internamente para realizar
+  solicitudes y, al mismo tiempo, proporciona una API fluida para verificar las respuestas.
+
+## RouterFunction - Test endpoint listar
+
+Realizaremos las pruebas a los endpoints trabajados con **RouterFunction**. Esta forma de trabajar los endpoints nos
+obligó a crear las clases `@Configuración RouterFunctionConfig` que contiene los endpoints de las solicitudes http y
+su **handlerFunction** correspondiente y la clase `@Component ProductHandler` que contiene la implementación de los
+**handlerFunctions**. Teniendo en cuenta lo anterior, crearemos la clase de prueba a partir de la
+clase `RouterFunctionConfig` porque contiene los **endpoints** a testear:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    @Autowired
+    private WebTestClient webTestClient;
+
+    @Test
+    void should_list_all_products() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v2/products")
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .hasSize(14);
+    }
+}
+````
+
+Del código anterior podemos ver que **estamos haciendo una petición real**
+`(real por esta configuración @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT))` al endpoint
+que trabajamos en la sección del **RouterFunction**: `/api/v2/products`.
+
+Ejecutamos el test simulando un error:
+
+![test-listar-error](./assets/test-listar-error.png)
+
+Ejecutamos el test correctamente:
+
+![test-listar-éxito](./assets/test-listar-exito.png)
+
+## RouterFunction - Test endpoint listar usando consumeWith()
+
+Podemos utilizar el **consumeWith()** para que en su interior realicemos las pruebas usando los **Assertions** de
+**JUnit**, entonces utilizando el mismo código que hicimos en el apartado anterior realizaremos un pequeño cambio
+para utilizar el **consumeWith()**:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted code */
+    @Test
+    void should_list_all_products_with_consumeWith() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v2/products")
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .consumeWith(listEntityExchangeResult -> {
+                    List<Product> products = listEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(products);
+                    Assertions.assertFalse(products.isEmpty());
+                    Assertions.assertEquals(14, products.size());
+                });
+    }
+}
+````
+
+## RouterFunction - Test endpoint ver detalle
+
+Para esta prueba utilizaremos el **jsonPath()** para hacer las comprobaciones. Pero antes es necesario agregar un
+método personalizado al repositorio de Producto, ya que siempre que levantemos el proyecto los ids de los productos
+almacenados en MongoDB serán aleatorios, no son siempre el mismo, por tal razón es necesario implementar un método
+adicional en el repositorio para buscar al producto por su nombre y luego usar su id para hacer la prueba al endpoint
+para ver los detalles por id:
+
+A continuación vemos dos formas de crear el método personalizado, uno utilizando el **query method**, es decir la
+consulta a la base de datos se hará usando la convención utilizada al nombrar al método y la otra utilizando la
+anotación **@Query()** donde definimos la consulta personalizada, en nuestro caso podemos utilizar cualquiera de los
+dos:
+
+````java
+public interface IProductRepository extends ReactiveMongoRepository<Product, String> {
+    Mono<Product> findByName(String name);
+
+    @Query("{'name' : ?0}")
+    Mono<Product> findProduct(String name);
+}
+````
+
+En la interfaz del servicio del producto agregamos un nuevo método:
+
+````java
+public interface IProductService {
+    /* omitted code */
+    Mono<Product> findByName(String name);
+}
+````
+
+Implementamos el método anterior en el servicio del producto concreto:
+
+````java
+
+@Service
+public class ProductServiceImpl implements IProductService {
+    /* omitted code */
+    @Override
+    public Mono<Product> findByName(String name) {
+        return this.productRepository.findProduct(name);
+    }
+}
+````
+
+Ahora implementamos nuestro método de prueba:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted property */
+    @Autowired
+    private IProductService productService;
+
+    /* omitted code */
+    @Test
+    void should_show_details_of_a_product() {
+        Product productDB = this.productService.findByName("Celular Huawey").block();
+
+        WebTestClient.ResponseSpec response = this.webTestClient.get()
+                .uri("/api/v2/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody()
+                .jsonPath("$.id").isNotEmpty()
+                .jsonPath("$.name").isEqualTo("Celular Huawey");
+    }
+}
+````
+
+## RouterFunction - Test endpoint crear producto
+
+Para poder crear un producto necesitamos previamente los datos de la categoría que ya está almacenado en la base de
+datos, por lo tanto, necesitamos crear un método personalizado al igual que en el apartado anterior:
+
+````java
+public interface ICategoryRepository extends ReactiveMongoRepository<Category, String> {
+    Mono<Category> findByName(String name);
+}
+````
+
+````java
+public interface IProductService {
+    /* omitted code */
+    Mono<Category> findCategoryByName(String name);
+}
+````
+
+````java
+
+@Service
+public class ProductServiceImpl implements IProductService {
+    /* omitted code */
+    @Override
+    public Mono<Category> findCategoryByName(String name) {
+        return this.categoryRepository.findByName(name);
+    }
+}
+````
+
+Finalmente, mostramos el método test para poder validar que el endpoint de crear un producto está funcionando
+correctamente:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted code */
+    @Test
+    void should_create_a_product() {
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+        Product product = new Product("Escoba", 25.70, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.post()
+                .uri("/api/v2/products")
+                .contentType(MediaType.APPLICATION_JSON)  //<-- Request
+                .accept(MediaType.APPLICATION_JSON)       //<-- Response
+                .bodyValue(product)
+                .exchange();
+
+        response.expectStatus().isCreated()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(product.getName(), productTest.getName());
+                    Assertions.assertEquals(product.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(product.getCategory());
+                    Assertions.assertEquals(product.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(product.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
+}
+````
+
+## RouterFunction - Test endpoint actualizar producto
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted code */
+    @Test
+    void should_update_a_product() {
+        Product productToUpdateDB = this.productService.findByName("Celular Huawey").block();
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+
+        Product productRequest = new Product("Sillón 3 cuerpos", 1600.00, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.put()
+                .uri("/api/v2/products/{id}", Collections.singletonMap("id", productToUpdateDB.getId()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(productRequest)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(productRequest.getName(), productTest.getName());
+                    Assertions.assertEquals(productRequest.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(productRequest.getCategory());
+                    Assertions.assertEquals(productRequest.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(productRequest.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
+}
+````
+
+## RouterFunction - Test endpoint eliminar producto
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted code */
+    @Test
+    void should_delete_a_product() {
+        Product productDB = this.productService.findByName("Silla de oficina").block();
+        WebTestClient.ResponseSpec response = this.webTestClient.delete()
+                .uri("/api/v2/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .exchange();
+
+        response.expectStatus().isNoContent()
+                .expectBody()
+                .isEmpty();
+    }
+}
+````
+
+**NOTA**
+
+> Como los métodos se ejecutan de manera aleatoria, es probable que en alguna ejecución fallen los métodos del listar,
+> ya que todos los test están trabajando con los mismos registros de la base de datos, es decir, si primero se ejecuta
+> este test de eliminar, disminuirá la cantidad de registros en la base de datos por lo que al momento de ejecutar los
+> test de listar productos los assertions fallarán pues no encontrarán la cantidad de productos definidos en esos test.
+>
+> Pero hasta el momento, he ejecutado los test varias veces y todos han pasado correctamente. No obstante, podríamos
+> usar la anotación **@Order** para darle un orden de ejecución a los test y así estar seguros de la ejecución de los
+> tests.
+
+## RestController - Métodos test para probar el controlador @RestController
+
+Nos posicionaremos dentro de la clase de controlador **ProductController** y presionando `ctrl + shift + T` damos en
+crear un nuevo test para crear la clase de test a partir de este controlador. Una vez creado el archivo de test,
+copiamos todos los test desarrollados en el **RouterFunctionConfigTest** y lo pegamos en nuestra nueva clase de test.
+Finalmente, **cambiamos la versión del endpoint** `de v2 a v1` para que los test apunten al endpoint definido en nuestro
+**ProductController**:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class ProductControllerTest {
+    @Autowired
+    private WebTestClient webTestClient;
+    @Autowired
+    private IProductService productService;
+
+    @Test
+    void should_list_all_products() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v1/products") //<-- Apuntando al endpoint de ProductController
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .hasSize(14);
+    }
+
+    @Test
+    void should_list_all_products_with_consumeWith() {
+        WebTestClient.ResponseSpec response = this.webTestClient.get().uri("/api/v1/products")
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBodyList(Product.class)
+                .consumeWith(listEntityExchangeResult -> {
+                    List<Product> products = listEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(products);
+                    Assertions.assertFalse(products.isEmpty());
+                    Assertions.assertEquals(14, products.size());
+                });
+    }
+
+    @Test
+    void should_show_details_of_a_product() {
+        Product productDB = this.productService.findByName("Celular Huawey").block();
+
+        WebTestClient.ResponseSpec response = this.webTestClient.get()
+                .uri("/api/v1/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody()
+                .jsonPath("$.id").isNotEmpty()
+                .jsonPath("$.name").isEqualTo("Celular Huawey");
+    }
+
+    @Test
+    void should_create_a_product() {
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+        Product product = new Product("Escoba", 25.70, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.post()
+                .uri("/api/v1/products")
+                .contentType(MediaType.APPLICATION_JSON)        //<-- Request
+                .accept(MediaType.APPLICATION_JSON)    //<-- Response
+                .bodyValue(product)
+                .exchange();
+
+        response.expectStatus().isCreated()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(product.getName(), productTest.getName());
+                    Assertions.assertEquals(product.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(product.getCategory());
+                    Assertions.assertEquals(product.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(product.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
+
+    @Test
+    void should_update_a_product() {
+        Product productToUpdateDB = this.productService.findByName("Celular Huawey").block();
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+
+        Product productRequest = new Product("Sillón 3 cuerpos", 1600.00, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.put()
+                .uri("/api/v1/products/{id}", Collections.singletonMap("id", productToUpdateDB.getId()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(productRequest)
+                .exchange();
+
+        response.expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(productRequest.getName(), productTest.getName());
+                    Assertions.assertEquals(productRequest.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(productRequest.getCategory());
+                    Assertions.assertEquals(productRequest.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(productRequest.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
+
+    @Test
+    void should_delete_a_product() {
+        Product productDB = this.productService.findByName("Silla de oficina").block();
+        WebTestClient.ResponseSpec response = this.webTestClient.delete()
+                .uri("/api/v1/products/{id}", Collections.singletonMap("id", productDB.getId()))
+                .exchange();
+
+        response.expectStatus().isNoContent()
+                .expectBody()
+                .isEmpty();
+    }
+
+}
+````
+
+## Mock - Ejecutando tests en un entorno simulado
+
+**Ejecutaremos los tests sin levantar un servidor real** que esté desplegado en algún puerto HTTP o que haga un request
+y response real, sino más bien simular el servidor y por consiguiente simular las request y responses, eso sería
+gracias al WebEnvironment.MOCK.
+
+Además, **siempre que usemos WebEnvironment.MOCK debemos acompañarlo con la anotación @AutoConfigureWebTestClient**
+para poder importar la autoconfiguración, el contexto de spring.
+
+La anotación **@AutoConfigureWebTestClient se utiliza para configurar un cliente web para realizar solicitudes HTTP
+simuladas** al controlador, y @SpringBootTest se utiliza para cargar el contexto de Spring para realizar pruebas de
+integración. En este caso, `webEnvironment = SpringBootTest.WebEnvironment.MOCK` indica que **se utilizará un entorno
+simulado (mock) en lugar de un servidor web real** para ejecutar las pruebas. En otras palabras, con esa configuración
+**Spring Boot no inicia un servidor web real para las pruebas**. En su lugar, crea un contexto de aplicación simulado
+que permite realizar pruebas de integración sin la necesidad de un servidor web en funcionamiento. Esto puede ser útil
+para realizar pruebas más rápidas y aisladas, ya que no se requiere la infraestructura completa de un servidor web real.
+
+Crearemos una clase de prueba a partir de nuestro controlador ProductController y copiaremos todos los test, tal cual,
+lo tenemos en los otras clases de prueba, lo único que cambiará será que agregamos la anotación
+`@AutoConfigureWebTestClient` y la configuración de `RANDOM_PORT` la cambiamos a `MOCK`.
+
+````java
+
+@AutoConfigureWebTestClient //<-- Agregamos anotación
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK) //<-- Cambiamos de RANDOM_PORT a MOCK
+class ProductControllerMockTest {
+
+    /**
+     * Podemos hacer uso de WebTestClient, teniendo el WebEnvironment.MOCK, 
+     * gracias a la anotación @AutoConfigureWebTestClient
+     */
+    @Autowired
+    private WebTestClient webTestClient;
+
+    @Autowired
+    private IProductService productService;
+
+    /**
+     *  Mismo código que usamos en la clase de prueba
+     *  ProductControllerTest o RouterFunctionConfigTest
+     */
+}
+````
+
+### Probando ProductController con  WebEnvironment.RANDOM_PORT
+
+Ejecutamos el test del ProductController como hemos venido trabajando desde el inicio de esta sección donde configuramos
+el **WebEnvironment.RANDOM_PORT** y veamos el resultado:
+
+![random port](./assets/random-port.png)
+
+### Probando ProductControllerMockTest con  WebEnvironment.MOCK
+
+Ahora ejecutemos los test donde configuramos el **WebEnvironment.MOCK**:
+
+![mock](./assets/mock.png)
