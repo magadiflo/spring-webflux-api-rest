@@ -1692,3 +1692,70 @@ class RouterFunctionConfigTest {
     }
 }
 ````
+
+## RouterFunction - Test endpoint crear producto
+
+Para poder crear un producto necesitamos previamente los datos de la categoría que ya está almacenado en la base de
+datos, por lo tanto, necesitamos crear un método personalizado al igual que en el apartado anterior:
+
+````java
+public interface ICategoryRepository extends ReactiveMongoRepository<Category, String> {
+    Mono<Category> findByName(String name);
+}
+````
+
+````java
+public interface IProductService {
+    /* omitted code */
+    Mono<Category> findCategoryByName(String name);
+}
+````
+
+````java
+
+@Service
+public class ProductServiceImpl implements IProductService {
+    /* omitted code */
+    @Override
+    public Mono<Category> findCategoryByName(String name) {
+        return this.categoryRepository.findByName(name);
+    }
+}
+````
+
+Finalmente, mostramos el método test para poder validar que el endpoint de crear un producto está funcionando
+correctamente:
+
+````java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RouterFunctionConfigTest {
+    /* omitted code */
+    @Test
+    void should_create_a_product() {
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+        Product product = new Product("Escoba", 25.70, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.post()
+                .uri("/api/v2/products")
+                .contentType(MediaType.APPLICATION_JSON)  //<-- Request
+                .accept(MediaType.APPLICATION_JSON)       //<-- Response
+                .bodyValue(product)
+                .exchange();
+
+        response.expectStatus().isCreated()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(product.getName(), productTest.getName());
+                    Assertions.assertEquals(product.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(product.getCategory());
+                    Assertions.assertEquals(product.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(product.getCategory().getName(), productTest.getCategory().getName());
+                });
+    }
+}
+````

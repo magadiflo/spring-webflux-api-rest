@@ -1,5 +1,6 @@
 package com.magadiflo.api.rest.app.handlers.config;
 
+import com.magadiflo.api.rest.app.models.documents.Category;
 import com.magadiflo.api.rest.app.models.documents.Product;
 import com.magadiflo.api.rest.app.models.services.IProductService;
 import org.junit.jupiter.api.Assertions;
@@ -64,5 +65,32 @@ class RouterFunctionConfigTest {
                 .expectBody()
                 .jsonPath("$.id").isNotEmpty()
                 .jsonPath("$.name").isEqualTo("Celular Huawey");
+    }
+
+    @Test
+    void should_create_a_product() {
+        Category categoryDB = this.productService.findCategoryByName("Muebles").block();
+        Product product = new Product("Escoba", 25.70, categoryDB);
+
+        WebTestClient.ResponseSpec response = this.webTestClient.post()
+                .uri("/api/v2/products")
+                .contentType(MediaType.APPLICATION_JSON)        //<-- Request
+                .accept(MediaType.APPLICATION_JSON)    //<-- Response
+                .bodyValue(product)
+                .exchange();
+
+        response.expectStatus().isCreated()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody(Product.class)
+                .consumeWith(productEntityExchangeResult -> {
+                    Product productTest = productEntityExchangeResult.getResponseBody();
+
+                    Assertions.assertNotNull(productTest);
+                    Assertions.assertEquals(product.getName(), productTest.getName());
+                    Assertions.assertEquals(product.getPrice(), productTest.getPrice());
+                    Assertions.assertNotNull(product.getCategory());
+                    Assertions.assertEquals(product.getCategory().getId(), productTest.getCategory().getId());
+                    Assertions.assertEquals(product.getCategory().getName(), productTest.getCategory().getName());
+                });
     }
 }
