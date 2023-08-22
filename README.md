@@ -2020,3 +2020,88 @@ el **WebEnvironment.RANDOM_PORT** y veamos el resultado:
 Ahora ejecutemos los test donde configuramos el **WebEnvironment.MOCK**:
 
 ![mock](./assets/mock.png)
+
+# Sección: Spring Cloud Eureka Server: Registrando los microservicios
+
+---
+
+Convertiremos este microservicio en un **cliente de eureka para que pueda registrarse en el servidor de eureka**. Para
+eso agregaremos la dependencia de **eureka client**:
+
+````xml
+<!--Versión Spring Boot: 3.1.2-->
+<project>
+    <properties>
+        <java.version>17</java.version>
+        <spring-cloud.version>2022.0.4</spring-cloud.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>
+````
+
+Cuando agregamos la dependencia de Eureka Client `spring-cloud-starter-netflix-eureka-client` **automáticamente** el
+microservicio **se habilita como un cliente de eureka**. Pero podemos ser explícitos y agregar una anotación en la
+clase principal para realizar esa habilitación, pero como se dijo, **tan solo agregando la dependencia ya estamos
+habilitándolo**, es decir, usar la anotación **es opcional**.
+
+````java
+
+@EnableDiscoveryClient //<-- (Opcional) Anotación para habilitar una implementación de DiscoveryClient.
+@SpringBootApplication
+public class MainApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(MainApplication.class, args);
+    }
+
+}
+````
+
+**NOTA**
+
+> En el curso de Andrés Guzmán y los cursos que he llevado con **versiones de Spring Boot <2.7.x** se usa la anotación
+> `@EnableEurekaClient`, pero en la versión de este proyecto de **Spring Boot 3.1.2 no se encuentra dicha anotación**,
+> pero sí está la anotación `@EnableDiscoveryClient` que técnicamente hacen lo mismo, aunque como se mencionó en un
+> párrafo anterior, **solo basta con agregar la dependencia en el pom.xml para que el proyecto quede habilitado como un
+> cliente de eureka**, por lo que usar la anotación es opcional.
+
+### @EnableEurekaClient vs @EnableDiscoveryClient
+
+- [Fuente: Stack Overflow.](https://stackoverflow.com/questions/31976236/whats-the-difference-between-enableeurekaclient-and-enablediscoveryclient)
+  Existen múltiples implementaciones del "Servicio de descubrimiento" **(Discovery Service)** como: eureka, consul,
+  zookeeper, etc. `@EnableDiscoveryClient` vive en **spring-cloud-commons** y elige la implementación en el classpath,
+  mientras que `@EnableEurekaClient` vive en **spring-cloud-netflix** y **solo funciona para Eureka**, si eureka está en
+  su classpath, en realidad ambos son iguales.
+
+- Si está utilizando **Eureka de Netflix, @EnableEurekaClient es específicamente para eso**. Pero si está utilizando
+  cualquier otro servicio de descubrimiento, incluido Eureka, puede usar **@EnableDiscoveryClient.**
+
+### Configurando ubicación de Eureka Server
+
+Configurar la ubicación física de **Eureka Server** en nuestro microservicio cliente **es opcional** siempre y cuando el
+Servidor de Eureka esté en la misma máquina (localhost) que nuestros microservicios clientes de eureka. Pero **sería
+mejor tenerlo configurado de forma explícita**.
+
+Una configuración adicional y requerida es el definirle un nombre a nuestra aplicación de Spring Boot y un puerto:
+
+````properties
+spring.application.name=service-product-api-rest
+server.port=8080
+eureka.client.service-url.defaultZone=http://localhost:8761/eureka
+````
