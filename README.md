@@ -2105,3 +2105,40 @@ spring.application.name=service-product-api-rest
 server.port=8080
 eureka.client.service-url.defaultZone=http://localhost:8761/eureka
 ````
+
+## Ejecutando múltiples instancias en IntelliJ IDEA
+
+Para poder ejecutar múltiples instancias usando **IntelliJ IDEA**, realizamos lo siguiente:
+
+````
+PRIMERO:
+Ejecutamos el proyecto como normalmente lo hacemos. Por ejemplo, se levantará en el puerto 8080 o en 
+el puerto que le hayamos definido en el application.properties.
+
+SEGUNDO:
+Para ejecutar otra instancia del proyecto, es necesario cambiar el puerto a uno distinto al que se ejecutó en el paso 
+anterior, para eso seguimos los siguientes pasos:
+
+PASOS:
+- Nos vamos a Edit Configurations...
+- En el lado izquierdo seleccionamos la configuración que está ejecutándose con el puerto 8080.
+- Clickeamos en Copy Configuration
+- Seleccionamos la nueva configuración copiada
+- Agregamos un nombre a la configuración: Ejm. MsProductosApplication 9001
+- Click en Modify options
+- Seleccionamos Add VM options
+- Se agregará un nuevo campo de texto. Escribimos el comando para cambiar el puerto
+	-Dserver.port=9001
+- Apply y OK
+
+Ejecutando nueva instancia
+----------------------------
+Seleccionamos nuestra nueva configuración y ejecutamos el proyecto.
+````
+
+**NOTA**
+> Estos pasos se tomaron de un proyecto que ya había realizado antes
+> [microservices-project](https://github.com/magadiflo/microservices-project/blob/main/business-domain/ms-productos/README.md)
+
+Listo, de esa manera podemos levantar múltiples instancias del microservicio **spring-webflux-api-rest** a fin de que se
+maneje el tema de balanceo de carga, mejor instancia, eureka, etc.
