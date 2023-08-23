@@ -2020,3 +2020,125 @@ el **WebEnvironment.RANDOM_PORT** y veamos el resultado:
 Ahora ejecutemos los test donde configuramos el **WebEnvironment.MOCK**:
 
 ![mock](./assets/mock.png)
+
+# Sección: Spring Cloud Eureka Server: Registrando los microservicios
+
+---
+
+Convertiremos este microservicio en un **cliente de eureka para que pueda registrarse en el servidor de eureka**. Para
+eso agregaremos la dependencia de **eureka client**:
+
+````xml
+<!--Versión Spring Boot: 3.1.2-->
+<project>
+    <properties>
+        <java.version>17</java.version>
+        <spring-cloud.version>2022.0.4</spring-cloud.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>
+````
+
+Cuando agregamos la dependencia de Eureka Client `spring-cloud-starter-netflix-eureka-client` **automáticamente** el
+microservicio **se habilita como un cliente de eureka**. Pero podemos ser explícitos y agregar una anotación en la
+clase principal para realizar esa habilitación, pero como se dijo, **tan solo agregando la dependencia ya estamos
+habilitándolo**, es decir, usar la anotación **es opcional**.
+
+````java
+
+@EnableDiscoveryClient //<-- (Opcional) Anotación para habilitar una implementación de DiscoveryClient.
+@SpringBootApplication
+public class MainApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(MainApplication.class, args);
+    }
+
+}
+````
+
+**NOTA**
+
+> En el curso de Andrés Guzmán y los cursos que he llevado con **versiones de Spring Boot <2.7.x** se usa la anotación
+> `@EnableEurekaClient`, pero en la versión de este proyecto de **Spring Boot 3.1.2 no se encuentra dicha anotación**,
+> pero sí está la anotación `@EnableDiscoveryClient` que técnicamente hacen lo mismo, aunque como se mencionó en un
+> párrafo anterior, **solo basta con agregar la dependencia en el pom.xml para que el proyecto quede habilitado como un
+> cliente de eureka**, por lo que usar la anotación es opcional.
+
+### @EnableEurekaClient vs @EnableDiscoveryClient
+
+- [Fuente: Stack Overflow.](https://stackoverflow.com/questions/31976236/whats-the-difference-between-enableeurekaclient-and-enablediscoveryclient)
+  Existen múltiples implementaciones del "Servicio de descubrimiento" **(Discovery Service)** como: eureka, consul,
+  zookeeper, etc. `@EnableDiscoveryClient` vive en **spring-cloud-commons** y elige la implementación en el classpath,
+  mientras que `@EnableEurekaClient` vive en **spring-cloud-netflix** y **solo funciona para Eureka**, si eureka está en
+  su classpath, en realidad ambos son iguales.
+
+- Si está utilizando **Eureka de Netflix, @EnableEurekaClient es específicamente para eso**. Pero si está utilizando
+  cualquier otro servicio de descubrimiento, incluido Eureka, puede usar **@EnableDiscoveryClient.**
+
+### Configurando ubicación de Eureka Server
+
+Configurar la ubicación física de **Eureka Server** en nuestro microservicio cliente **es opcional** siempre y cuando el
+Servidor de Eureka esté en la misma máquina (localhost) que nuestros microservicios clientes de eureka. Pero **sería
+mejor tenerlo configurado de forma explícita**.
+
+Una configuración adicional y requerida es el definirle un nombre a nuestra aplicación de Spring Boot y un puerto:
+
+````properties
+spring.application.name=service-product-api-rest
+server.port=8080
+eureka.client.service-url.defaultZone=http://localhost:8761/eureka
+````
+
+## Ejecutando múltiples instancias en IntelliJ IDEA
+
+Para poder ejecutar múltiples instancias usando **IntelliJ IDEA**, realizamos lo siguiente:
+
+````
+PRIMERO:
+Ejecutamos el proyecto como normalmente lo hacemos. Por ejemplo, se levantará en el puerto 8080 o en 
+el puerto que le hayamos definido en el application.properties.
+
+SEGUNDO:
+Para ejecutar otra instancia del proyecto, es necesario cambiar el puerto a uno distinto al que se ejecutó en el paso 
+anterior, para eso seguimos los siguientes pasos:
+
+PASOS:
+- Nos vamos a Edit Configurations...
+- En el lado izquierdo seleccionamos la configuración que está ejecutándose con el puerto 8080.
+- Clickeamos en Copy Configuration
+- Seleccionamos la nueva configuración copiada
+- Agregamos un nombre a la configuración: Ejm. MsProductosApplication 9001
+- Click en Modify options
+- Seleccionamos Add VM options
+- Se agregará un nuevo campo de texto. Escribimos el comando para cambiar el puerto
+	-Dserver.port=9001
+- Apply y OK
+
+Ejecutando nueva instancia
+----------------------------
+Seleccionamos nuestra nueva configuración y ejecutamos el proyecto.
+````
+
+**NOTA**
+> Estos pasos se tomaron de un proyecto que ya había realizado antes
+> [microservices-project](https://github.com/magadiflo/microservices-project/blob/main/business-domain/ms-productos/README.md)
+
+Listo, de esa manera podemos levantar múltiples instancias del microservicio **spring-webflux-api-rest** a fin de que se
+maneje el tema de balanceo de carga, mejor instancia, eureka, etc.
