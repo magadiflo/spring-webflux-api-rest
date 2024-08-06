@@ -711,6 +711,171 @@ curl -v -X POST -H "Content-Type: application/json" -d "{\"name\": \"Cocina\", \
 }
 ````
 
+## Crea producto junto a su imagen y aplica validación
+
+El siguiente endpoint crea un producto en la base de datos junto a una imagen que se le envía por la solicitud. Lo nuevo
+en este endpoint es que estamos validando los valores de la entidad producto con la anotación `@Valid`, además notar,
+que la variable product de tipo `Product` tiene anotado el `@RequestPart`.
+
+En otras palabras, la línea `@Valid @RequestPart Product product` indica que el campo `product` de la solicitud
+`multipart` debe contener un `JSON` con los valores del objeto `Product`. Este `JSON` se deserializa en una instancia
+de `Product` y luego se valida según las anotaciones de validación aplicadas a los campos de la clase `Product`.
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+
+    /* other codes */
+
+    @PostMapping(path = "/product-with-image-validation")
+    public Mono<ResponseEntity<Product>> createProductWithImageAndValidation(@Valid @RequestPart Product product, @RequestPart FilePart imageFile) {
+        if (product.getCreateAt() == null) {
+            product.setCreateAt(LocalDate.now());
+        }
+
+        int extensionIndex = imageFile.filename().lastIndexOf(".");
+        String extension = imageFile.filename().substring(extensionIndex);
+        String imageName = "%s%s".formatted(UUID.randomUUID().toString(), extension)
+                .replace("-", "");
+
+        product.setImage(imageName);
+
+        return imageFile.transferTo(new File(this.uploadsPath + product.getImage()))
+                .then(this.productService.saveProduct(product)
+                        .map(productDB -> ResponseEntity
+                                .created(URI.create("/api/v1/products/" + productDB.getId()))
+                                .body(productDB))
+                );
+    }
+}
+````
+
+Enviamos una solicitud desde un cliente. Observar que el campo `product` se está enviando un objeto `JSON` que
+corresponde a los atributos esperados por el parámetro `product`. El siguiente campo que se le envía es el de
+la imagen seleccionada `imageFile`.
+
+Recordar que esta es una solicitud (request) del tipo `multipart`. Esto significa, que cada parte puede tener su propio
+tipo de contenido. La anotación `@RequestPart` en Spring Boot se utiliza para indicar que los parámetros del método se
+deben extraer de diferentes partes de una solicitud multipart.
+
+En la siguiente petición, vemos una ejecución exitosa.
+
+````bash
+$ curl -v -X POST -H "Content-Type: multipart/form-data" -F "product={\"name\": \"Curso de java\", \"price\": 36.60, \"category\": {\"id\": \"66b246f2d357783b00736f7a\", \"name\": \"Muebles\"}};type=application/json" -F "imageFile=@C:\Users\USUARIO\Downloads\images.png" http://localhost:8080/api/v1/products/product-with-image-validation | jq
+> POST /api/v1/products/product-with-image-validation HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/8.7.1
+> Accept: */*
+> Content-Length: 3553
+> Content-Type: multipart/form-data; boundary=------------------------YQy0MNzxahzeSd9LTkIgZk
+>
+< HTTP/1.1 201 Created
+< Location: /api/v1/products/66b247bcd357783b00736f8a
+< Content-Type: application/json
+< Content-Length: 202
+<
+{
+  "id": "66b247bcd357783b00736f8a",
+  "name": "Curso de java",
+  "price": 36.6,
+  "createAt": "2024-08-06",
+  "image": "fd1e460f5e714c3bb8adf9ef481874b1.png",
+  "category": {
+    "id": "66b246f2d357783b00736f7a",
+    "name": "Muebles"
+  }
+}
+````
+
+En la siguiente petición vemos que no le estamos enviando el `name` de producto ni el `id` de categoría, por lo tanto,
+el backend está aplicando las validaciones correspondientes.
+
+````bash
+$ curl -v -X POST -H "Content-Type: multipart/form-data" -F "product={\"price\": 45.50, \"category\": {\"name\": \"Muebles\"}};type=application/json" -F "imageFile=@C:\Users\USUARIO\Downloads\images.png" http://localhost:8080/api/v1/products/product-with-image-validation | jq
+>
+< HTTP/1.1 400 Bad Request
+< Content-Type: application/json
+< Content-Length: 1294
+<
+{
+  "timestamp": "2024-08-06T16:01:33.709+00:00",
+  "path": "/api/v1/products/product-with-image-validation",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed for argument at index 0 in method: public reactor.core.publisher.Mono<org.springframework.http.ResponseEntity<com.magadiflo.api.rest.app.models.documents.Product>> com.magadiflo.api.rest.app.controllers.ProductController.createProductWithImageAndValidation(com.magadiflo.api.rest.app.models.documents.Product,org.springframework.http.codec.multipart.FilePart), with 2 error(s): [Field error in object 'product' on field 'name': rejected value [null]; codes [NotBlank.product.name,NotBlank.name,NotBlank.java.lang.String,NotBlank]; arguments [org.springframework.context.support.DefaultMessageSourceResolvable: codes [product.name,name]; arguments []; default message [name]]; default message [must not be blank]] [Field error in object 'product' on field 'category.id': rejected value [null]; codes [NotBlank.product.category.id,NotBlank.category.id,NotBlank.id,NotBlank.java.lang.String,NotBlank]; arguments [org.springframework.context.support.DefaultMessageSourceResolvable: codes [product.category.id,category.id]; arguments []; default message [category.id]]; default message [must not be blank]] ",
+  "requestId": "1b02e89b-1"
+}
+````
+
+Si estuviéramos trabajando con `Angular`, podríamos construir la petición de la siguiente manera:
+
+````html
+<!-- product-form.component.html -->
+<form [formGroup]="productForm" (ngSubmit)="onSubmit()">
+    <div>
+        <label for="name">Name:</label>
+        <input id="name" formControlName="name" type="text">
+    </div>
+    <div>
+        <label for="description">Description:</label>
+        <input id="description" formControlName="description" type="text">
+    </div>
+    <div>
+        <label for="imageFile">Image File:</label>
+        <input id="imageFile" type="file" (change)="onFileSelected($event)">
+    </div>
+    <button type="submit">Submit</button>
+</form>
+````
+
+````typescript
+// product-form.component.ts
+import { Component } from '@angular/core';
+import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
+
+@Component({
+    selector: 'app-product-form',
+    templateUrl: './product-form.component.html'
+})
+export class ProductFormComponent {
+    productForm: FormGroup;
+    selectedFile: File | null = null;
+
+    constructor(private fb: FormBuilder, private http: HttpClient) {
+        this.productForm = this.fb.group({
+            name: ['', Validators.required],
+            description: ['', Validators.required]
+        });
+    }
+
+    onFileSelected(event: Event): void {
+        const input = event.target as HTMLInputElement;
+        if (input.files && input.files.length > 0) {
+            this.selectedFile = input.files[0];
+        }
+    }
+
+    onSubmit(): void {
+        if (this.productForm.invalid || !this.selectedFile) {
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('product', new Blob([JSON.stringify(this.productForm.value)], { type: 'application/json' }));
+        formData.append('imageFile', this.selectedFile);
+
+        this.http.post('/product-with-image-validation', formData).subscribe(response => {
+            console.log('Response:', response);
+        }, error => {
+            console.error('Error:', error);
+        });
+    }
+}
+````
+
 ---
 
 # Sección: API RESTFul usando Functional EndPoints

@@ -141,4 +141,25 @@ public class ProductController {
                 );
     }
 
+    @PostMapping(path = "/product-with-image-validation")
+    public Mono<ResponseEntity<Product>> createProductWithImageAndValidation(@Valid @RequestPart Product product, @RequestPart FilePart imageFile) {
+        if (product.getCreateAt() == null) {
+            product.setCreateAt(LocalDate.now());
+        }
+
+        int extensionIndex = imageFile.filename().lastIndexOf(".");
+        String extension = imageFile.filename().substring(extensionIndex);
+        String imageName = "%s%s".formatted(UUID.randomUUID().toString(), extension)
+                .replace("-", "");
+
+        product.setImage(imageName);
+
+        return imageFile.transferTo(new File(this.uploadsPath + product.getImage()))
+                .then(this.productService.saveProduct(product)
+                        .map(productDB -> ResponseEntity
+                                .created(URI.create("/api/v1/products/" + productDB.getId()))
+                                .body(productDB))
+                );
+    }
+
 }
