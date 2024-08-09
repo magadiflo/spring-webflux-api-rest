@@ -45,6 +45,29 @@ Copiamos las clases, interfaces, propiedades, etc. del proyecto de
 Como se aprecia, tenemos todas las capas excepto la de **/resources o /controllers**, quien contendrá nuestras clases
 controladoras anotadas con @RestController.
 
+## [ResponseEntity](https://docs.spring.io/spring-framework/reference/web/webflux/controller/ann-methods/responseentity.html)
+
+Antes de continuar con la implementación de los endpoints del rest controller, vamos a hablar sobre el `ResponseEntity`.
+El `ResponseEntity` es como el `@ResponseBody` pero con `status` y `headers`.
+
+`WebFlux` admite el uso de un tipo reactivo de un solo valor para producir el `ResponseEntity` de manera asíncrona,
+y/o tipos reactivos de un solo valor y de múltiples valores para el cuerpo. Esto permite una variedad de respuestas
+asíncronas con `ResponseEntity` como sigue:
+
+- `ResponseEntity<Mono<T>>` o `ResponseEntity<Flux<T>>` hacen que el `status` y los `headers` de la respuesta se
+  conozcan de inmediato, mientras que el cuerpo se proporciona de manera asíncrona en un momento posterior. Usa `Mono`
+  si el cuerpo consiste en 0 a 1 valores, o `Flux` si puede producir múltiples valores.
+
+
+- `Mono<ResponseEntity<T>>` proporciona los tres: `status` de la respuesta, `headers` y `body`, de manera
+  asíncrona en un momento posterior. Esto permite que el `status` y los `headers` de la respuesta varíen según el
+  resultado del manejo asíncrono de la solicitud.
+
+
+- `Mono<ResponseEntity<Mono<T>>>` o `Mono<ResponseEntity<Flux<T>>>` son otra alternativa posible, aunque menos común.
+  Proporcionan primero el `status` y los `headers` de la respuesta de manera asíncrona, y luego el cuerpo de la
+  respuesta, también de manera asíncrona.
+
 ## RestController - GET Listar productos
 
 Creamos nuestro controlador del tipo **RestController** y empezamos a implementar los métodos handler empezando por el
